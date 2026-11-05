@@ -124,3 +124,17 @@ def select_tree_prefix_reference(
     if stored and max(depths) > sum(bool(valid) for valid in valid_depths):
         return 0, PolicyStatus.LAYOUT_ERROR
     return count_selected_prefix(depths, parents, kept_depth), PolicyStatus.CONFIDENCE
+
+
+def select_tree_prefix_batch_reference(rows, *, policy: str, tau: float):
+    """Apply score fallback to every active confidence row in this batch."""
+    decisions = [select_tree_prefix_reference(**row, policy=policy, tau=tau) for row in rows]
+    score_fallback = any(status == PolicyStatus.SCORE_FALLBACK for _, status in decisions)
+    if not score_fallback:
+        return decisions
+    return [
+        (len(row["depths"]), PolicyStatus.SCORE_FALLBACK)
+        if status in {PolicyStatus.CONFIDENCE, PolicyStatus.SCORE_FALLBACK}
+        else (count, status)
+        for row, (count, status) in zip(rows, decisions)
+    ]

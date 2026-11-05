@@ -51,6 +51,19 @@ def runtime_facts(**changes):
 
 
 class TestBudgetPolicy(unittest.TestCase):
+    def test_batch_fallback_only_changes_confidence_rows(self):
+        rows = [example_row(), example_row(invalid_scores=True), example_row(bootstrap=True)]
+        self.assertEqual(policy.select_tree_prefix_batch_reference(rows, policy="confidence", tau=0.1), [
+            (6, policy.PolicyStatus.SCORE_FALLBACK), (6, policy.PolicyStatus.SCORE_FALLBACK),
+            (6, policy.PolicyStatus.BOOTSTRAP_FIXED),
+        ])
+        self.assertEqual(policy.select_tree_prefix_batch_reference(rows, policy="fixed", tau=0.1), [(6, policy.PolicyStatus.FIXED)] * 3)
+        rows = [example_row(parents=[0, 0, 3, 2, 3, 4]), example_row(invalid_scores=True)]
+        self.assertEqual(policy.select_tree_prefix_batch_reference(rows, policy="confidence", tau=0.1), [
+            (0, policy.PolicyStatus.LAYOUT_ERROR), (6, policy.PolicyStatus.SCORE_FALLBACK),
+        ])
+        self.assertEqual(policy.select_tree_prefix_batch_reference([], policy="confidence", tau=0.1), [])
+
     def test_row_policy_fixed_bootstrap_and_errors(self):
         def choose(row, mode="confidence", tau=0.1):
             return policy.select_tree_prefix_reference(**row, policy=mode, tau=tau)
