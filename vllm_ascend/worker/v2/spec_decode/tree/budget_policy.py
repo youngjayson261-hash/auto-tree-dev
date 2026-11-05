@@ -89,3 +89,38 @@ def count_selected_prefix(depths, parents, kept_depth: int) -> int:
             raise TreeLayoutError("parent depth does not match child depth")
         previous_depth = depth
     return sum(depth <= kept_depth for depth in depths)
+
+
+def select_tree_prefix_reference(
+    *, depths, parents, max_path_logp, valid_depths, invalid_scores,
+    policy: str, tau: float, bootstrap: bool,
+):
+    """Return a non-root budget and status for one original selected tree.
+
+    LAYOUT_ERROR is fatal for the caller; it is never a safe fallback budget.
+    """
+    validate_policy_config(policy, tau)
+    stored = len(depths)
+    try:
+        count_selected_prefix(depths, parents, 0)
+    except TreeLayoutError:
+        return 0, PolicyStatus.LAYOUT_ERROR
+    if policy == "fixed" or tau == 0:
+        return stored, PolicyStatus.FIXED
+    if bootstrap:
+        return stored, PolicyStatus.BOOTSTRAP_FIXED
+    if max_path_logp is None or valid_depths is None:
+        return stored, PolicyStatus.SCORE_FALLBACK
+    try:
+        kept_depth = consecutive_kept_depth(max_path_logp, valid_depths, tau)
+    except TreeLayoutError:
+        return 0, PolicyStatus.LAYOUT_ERROR
+    bad_score = invalid_scores or any(
+        valid and (math.isnan(value) or value == math.inf or value > 0)
+        for value, valid in zip(max_path_logp, valid_depths)
+    )
+    if bad_score or (stored > 0 and not any(valid_depths)):
+        return stored, PolicyStatus.SCORE_FALLBACK
+    if stored and max(depths) > sum(bool(valid) for valid in valid_depths):
+        return 0, PolicyStatus.LAYOUT_ERROR
+    return count_selected_prefix(depths, parents, kept_depth), PolicyStatus.CONFIDENCE
