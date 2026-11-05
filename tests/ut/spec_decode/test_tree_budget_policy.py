@@ -51,6 +51,32 @@ def runtime_facts(**changes):
 
 
 class TestBudgetPolicy(unittest.TestCase):
+    def test_layout_errors_take_priority_over_score_fallback(self):
+        for changes in (
+            {"invalid_scores": True},
+            {"max_path_logp": [math.nan, -0.2, -0.3]},
+            {"max_path_logp": [math.inf, -0.2, -0.3]},
+            {"max_path_logp": [0.01, -0.2, -0.3]},
+        ):
+            with self.subTest(changes=changes):
+                row = example_row(valid_depths=[True, True, False], **changes)
+                self.assertEqual(
+                    policy.select_tree_prefix_reference(**row, policy="confidence", tau=0.1),
+                    (0, policy.PolicyStatus.LAYOUT_ERROR),
+                )
+                self.assertEqual(
+                    policy.select_tree_prefix_batch_reference(
+                        [row, example_row(), example_row(invalid_scores=True)],
+                        policy="confidence",
+                        tau=0.1,
+                    ),
+                    [
+                        (0, policy.PolicyStatus.LAYOUT_ERROR),
+                        (6, policy.PolicyStatus.SCORE_FALLBACK),
+                        (6, policy.PolicyStatus.SCORE_FALLBACK),
+                    ],
+                )
+
     def test_scorer_identity_and_runtime_admission(self):
         class Independent:
             pass
