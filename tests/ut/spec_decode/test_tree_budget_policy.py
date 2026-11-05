@@ -51,6 +51,24 @@ def runtime_facts(**changes):
 
 
 class TestBudgetPolicy(unittest.TestCase):
+    def test_real_node_count_and_prefix_topology(self):
+        depths = [1, 1, 1, 2, 3]
+        parents = [0, 0, 0, 1, 4]
+        self.assertEqual(policy.count_selected_prefix(depths, parents, 2), 4)
+        self.assertEqual(depths, [1, 1, 1, 2, 3])
+        self.assertEqual(parents, [0, 0, 0, 1, 4])
+        self.assertEqual(policy.count_selected_prefix([1, 1, 2], [0, 0, 1], 0), 0)
+        self.assertEqual(policy.count_selected_prefix([], [], 0), 0)
+        malformed = [([1, 2, 1], [0, 1, 0]), ([1, 2], [0, 2]),
+                     ([1, 3], [0, 1]), ([1], []), ([True], [0]),
+                     ([1], [-1]), ([1], [False])]
+        for depths, parents in malformed:
+            with self.subTest(depths=depths, parents=parents), self.assertRaises(policy.TreeLayoutError):
+                policy.count_selected_prefix(depths, parents, 2)
+        for kept_depth in (-1, True, 1.0):
+            with self.subTest(kept_depth=kept_depth), self.assertRaises(policy.TreeLayoutError):
+                policy.count_selected_prefix([1], [0], kept_depth)
+
     def test_continuous_depth_and_equality(self):
         scores = [math.log(0.8), math.log(0.2), math.log(0.04)]
         self.assertEqual(policy.consecutive_kept_depth(scores, [True] * 3, 0.1), 2)
