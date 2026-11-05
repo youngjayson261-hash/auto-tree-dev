@@ -70,3 +70,22 @@ def consecutive_kept_depth(max_path_logp, valid_depths, tau: float) -> int:
             break
         kept += 1
     return kept
+
+
+def count_selected_prefix(depths, parents, kept_depth: int) -> int:
+    """Count original selected nodes without reselection or renumbering."""
+    if len(depths) != len(parents):
+        raise TreeLayoutError("selected depth and parent lengths differ")
+    if type(kept_depth) is not int or kept_depth < 0:
+        raise TreeLayoutError("kept depth must be a nonnegative integer")
+    previous_depth = 0
+    for node_id, (depth, parent) in enumerate(zip(depths, parents), start=1):
+        if type(depth) is not int or type(parent) is not int:
+            raise TreeLayoutError("node depth and parent must be integers")
+        if depth < 1 or depth < previous_depth or not 0 <= parent < node_id:
+            raise TreeLayoutError("selected nodes are not an ancestor-closed depth prefix")
+        expected_depth = 1 if parent == 0 else depths[parent - 1] + 1
+        if depth != expected_depth:
+            raise TreeLayoutError("parent depth does not match child depth")
+        previous_depth = depth
+    return sum(depth <= kept_depth for depth in depths)
