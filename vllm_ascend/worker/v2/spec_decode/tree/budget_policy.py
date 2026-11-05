@@ -152,6 +152,11 @@ def admit_confidence_scorer(scorer_type, independent_type, full_vocab_proven: bo
     return scorer_type is independent_type and full_vocab_proven
 
 
+def admit_base_confidence_scorer(scorer_type, independent_type, domino_type, full_vocab_proven: bool) -> bool:
+    """Admit scorers with an explicit full-vocabulary base-confidence path."""
+    return full_vocab_proven is True and (scorer_type is independent_type or scorer_type is domino_type)
+
+
 def validate_runtime_facts(
     *,
     async_scheduling,
