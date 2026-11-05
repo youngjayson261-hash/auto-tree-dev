@@ -28,9 +28,9 @@ class TreeLayoutError(ValueError):
 class TreeScoreSummary(NamedTuple):
     """Device summary: FP32 path maxima, valid depth mask and bad-score rows."""
 
-    max_path_logp: "Tensor"
-    valid_depths: "Tensor"
-    invalid_scores: "Tensor"
+    max_path_logp: Tensor
+    valid_depths: Tensor
+    invalid_scores: Tensor
 
 
 def validate_policy_config(policy: str, tau: float) -> None:
@@ -92,8 +92,15 @@ def count_selected_prefix(depths, parents, kept_depth: int) -> int:
 
 
 def select_tree_prefix_reference(
-    *, depths, parents, max_path_logp, valid_depths, invalid_scores,
-    policy: str, tau: float, bootstrap: bool,
+    *,
+    depths,
+    parents,
+    max_path_logp,
+    valid_depths,
+    invalid_scores,
+    policy: str,
+    tau: float,
+    bootstrap: bool,
 ):
     """Return a non-root budget and status for one original selected tree.
 
@@ -138,3 +145,41 @@ def select_tree_prefix_batch_reference(rows, *, policy: str, tau: float):
         else (count, status)
         for row, (count, status) in zip(rows, decisions)
     ]
+
+
+def admit_confidence_scorer(scorer_type, independent_type, full_vocab_proven: bool) -> bool:
+    """Subclasses must establish their own probability semantics before admission."""
+    return scorer_type is independent_type and full_vocab_proven
+
+
+def validate_runtime_facts(
+    *,
+    async_scheduling,
+    tp,
+    pp,
+    max_concurrent_batches,
+    bonus_count,
+    enforce_eager,
+    tree_graph_present,
+    adaptive_manager_present,
+    greedy,
+    grammar,
+    processors_supported,
+    scorer_admitted,
+):
+    """Reject unsupported R1 confidence configurations with concrete reasons."""
+    checks = (
+        (not async_scheduling, "async_scheduling"),
+        (tp == 1 and pp == 1, "parallelism"),
+        (max_concurrent_batches == 1, "concurrent_batches"),
+        (bonus_count == 1, "single_root"),
+        (enforce_eager and not tree_graph_present, "eager"),
+        (not adaptive_manager_present, "adaptive_manager"),
+        (greedy, "greedy"),
+        (not grammar, "grammar"),
+        (processors_supported, "processors"),
+        (scorer_admitted, "scorer"),
+    )
+    failures = tuple(name for passed, name in checks if not passed)
+    if failures:
+        raise ValueError("confidence unsupported: " + ",".join(failures))
