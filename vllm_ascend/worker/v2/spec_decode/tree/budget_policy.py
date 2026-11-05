@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+from ctypes import c_float
 from enum import IntEnum
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -48,3 +49,24 @@ def validate_tree_counts(s: int, a: int, v: int, capacity: int) -> None:
         raise ValueError("tree counts must be host integers")
     if not 0 <= v <= a <= s <= capacity:
         raise ValueError("expected 0 <= V <= A <= S <= B")
+
+
+def consecutive_kept_depth(max_path_logp, valid_depths, tau: float) -> int:
+    """Keep consecutive passing depths using the device's FP32 boundary."""
+    if len(max_path_logp) != len(valid_depths):
+        raise TreeLayoutError("score summary lengths differ")
+    validate_policy_config("confidence", tau)
+    if tau == 0:
+        raise ValueError("confidence threshold must be in (0, 1]")
+    seen_gap = False
+    for valid in valid_depths:
+        if valid and seen_gap:
+            raise TreeLayoutError("valid depths have a hole")
+        seen_gap = seen_gap or not valid
+    boundary = c_float(math.log(tau)).value
+    kept = 0
+    for value, valid in zip(max_path_logp, valid_depths):
+        if not valid or c_float(value).value < boundary:
+            break
+        kept += 1
+    return kept
