@@ -51,6 +51,27 @@ def runtime_facts(**changes):
 
 
 class TestBudgetPolicy(unittest.TestCase):
+    def test_row_policy_fixed_bootstrap_and_errors(self):
+        def choose(row, mode="confidence", tau=0.1):
+            return policy.select_tree_prefix_reference(**row, policy=mode, tau=tau)
+
+        self.assertEqual(choose(example_row()), (4, policy.PolicyStatus.CONFIDENCE))
+        self.assertEqual(choose(example_row(), "fixed"), (6, policy.PolicyStatus.FIXED))
+        self.assertEqual(choose(example_row(), tau=0), (6, policy.PolicyStatus.FIXED))
+        self.assertEqual(choose(example_row(bootstrap=True, max_path_logp=None)), (6, policy.PolicyStatus.BOOTSTRAP_FIXED))
+        for value in [math.nan, math.inf, 0.01]:
+            with self.subTest(value=value):
+                self.assertEqual(choose(example_row(max_path_logp=[value, -0.2, -0.3])), (6, policy.PolicyStatus.SCORE_FALLBACK))
+        self.assertEqual(choose(example_row(max_path_logp=[-math.inf] * 3)), (0, policy.PolicyStatus.CONFIDENCE))
+        self.assertEqual(choose(example_row(valid_depths=[True, False, True])), (0, policy.PolicyStatus.LAYOUT_ERROR))
+        self.assertEqual(choose(example_row(parents=[0, 0, 3, 2, 3, 4])), (0, policy.PolicyStatus.LAYOUT_ERROR))
+        self.assertEqual(choose(example_row(max_path_logp=None)), (6, policy.PolicyStatus.SCORE_FALLBACK))
+        self.assertEqual(choose(example_row(invalid_scores=True)), (6, policy.PolicyStatus.SCORE_FALLBACK))
+        self.assertEqual(choose(example_row(valid_depths=[False] * 3)), (6, policy.PolicyStatus.SCORE_FALLBACK))
+        self.assertEqual(choose(example_row(valid_depths=[True, True, False])), (0, policy.PolicyStatus.LAYOUT_ERROR))
+        self.assertEqual(choose(example_row(depths=[], parents=[], max_path_logp=[], valid_depths=[])), (0, policy.PolicyStatus.CONFIDENCE))
+        self.assertEqual(choose(example_row(invalid_scores=True), "fixed"), (6, policy.PolicyStatus.FIXED))
+
     def test_real_node_count_and_prefix_topology(self):
         depths = [1, 1, 1, 2, 3]
         parents = [0, 0, 0, 1, 4]
