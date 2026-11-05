@@ -122,14 +122,14 @@ def select_tree_prefix_reference(
         kept_depth = consecutive_kept_depth(max_path_logp, valid_depths, tau)
     except TreeLayoutError:
         return 0, PolicyStatus.LAYOUT_ERROR
+    if stored and any(valid_depths) and max(depths) > sum(bool(valid) for valid in valid_depths):
+        return 0, PolicyStatus.LAYOUT_ERROR
     bad_score = invalid_scores or any(
         valid and (math.isnan(value) or value == math.inf or value > 0)
         for value, valid in zip(max_path_logp, valid_depths)
     )
     if bad_score or (stored > 0 and not any(valid_depths)):
         return stored, PolicyStatus.SCORE_FALLBACK
-    if stored and max(depths) > sum(bool(valid) for valid in valid_depths):
-        return 0, PolicyStatus.LAYOUT_ERROR
     return count_selected_prefix(depths, parents, kept_depth), PolicyStatus.CONFIDENCE
 
 
