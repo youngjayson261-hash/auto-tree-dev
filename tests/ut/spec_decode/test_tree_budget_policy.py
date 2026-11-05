@@ -3,8 +3,10 @@
 
 import importlib.util
 import math
+import struct
 import sys
 import unittest
+from ctypes import c_float
 from pathlib import Path
 
 # Import the standard-library reference without importing the NPU worker package.
@@ -49,6 +51,25 @@ def runtime_facts(**changes):
 
 
 class TestBudgetPolicy(unittest.TestCase):
+    def test_continuous_depth_and_equality(self):
+        scores = [math.log(0.8), math.log(0.2), math.log(0.04)]
+        self.assertEqual(policy.consecutive_kept_depth(scores, [True] * 3, 0.1), 2)
+        self.assertEqual(policy.consecutive_kept_depth([math.log(0.1)], [True], 0.1), 1)
+        self.assertEqual(policy.consecutive_kept_depth([math.log(0.05), math.log(0.8)], [True] * 2, 0.1), 0)
+        self.assertEqual(policy.consecutive_kept_depth([-math.inf], [True], 0.1), 0)
+        self.assertEqual(policy.consecutive_kept_depth([0.0], [True], 1.0), 1)
+        with self.assertRaises(policy.TreeLayoutError):
+            policy.consecutive_kept_depth([-0.1, -0.2, -0.3], [True, False, True], 0.1)
+        with self.assertRaises(policy.TreeLayoutError):
+            policy.consecutive_kept_depth([-0.1], [], 0.1)
+        boundary = c_float(math.log(0.8)).value
+        below_bits = struct.unpack("!I", struct.pack("!f", boundary))[0] + 1
+        below = struct.unpack("!f", struct.pack("!I", below_bits))[0]
+        self.assertEqual(policy.consecutive_kept_depth([boundary], [True], 0.8), 1)
+        self.assertEqual(policy.consecutive_kept_depth([below], [True], 0.8), 0)
+        self.assertEqual(policy.consecutive_kept_depth([math.log(1e-50)], [True], 1e-50), 1)
+        self.assertEqual(scores, [math.log(0.8), math.log(0.2), math.log(0.04)])
+
     def test_config_and_count_contracts(self):
         for mode in ("fixed", "confidence"):
             for threshold in (0, 0.1, 1):
