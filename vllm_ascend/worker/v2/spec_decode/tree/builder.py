@@ -4,6 +4,15 @@ from dataclasses import dataclass
 
 import torch
 
+from vllm_ascend.worker.v2.spec_decode.tree.base_confidence import (
+    BaseConfidenceContext,
+    prepare_base_confidence,
+)
+from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import (
+    TreeLayoutError,
+    TreeScoreSummary,
+    admit_base_confidence_scorer,
+)
 from vllm_ascend.worker.v2.spec_decode.tree.layout import TreeLayout, finalize_tree_layout_from_state
 from vllm_ascend.worker.v2.spec_decode.tree.scoring import (
     DFlash2Scorer,
@@ -60,6 +69,7 @@ class TreeBuilder:
         self._scratch_reqs = self._scratch_vocab = self._scratch_spec = 0
         self._tokens_buf = self._depths_buf = self._parents_buf = None
         self._path_scores_buf = self._frontier_buf = None
+        self._base_path_scores_buf = None
         self._node_arange = self._selection_buf = None
         self._scratch_frozen = False
 
@@ -90,6 +100,7 @@ class TreeBuilder:
             self._depths_buf,
             self._parents_buf,
             self._path_scores_buf,
+            self._base_path_scores_buf,
             self._frontier_buf,
             self._node_arange,
             self._selection_buf,
@@ -134,13 +145,16 @@ class TreeBuilder:
             self._depths_buf = torch.empty((r, capacity), dtype=torch.long, device=device)
             self._parents_buf = torch.empty((r, max_nodes), dtype=torch.long, device=device)
             self._path_scores_buf = torch.empty((r, max_nodes), dtype=torch.float32, device=device)
+            self._base_path_scores_buf = torch.empty((r, max_nodes), dtype=torch.float32, device=device)
             self._frontier_buf = torch.empty((r, w), dtype=torch.long, device=device)
             self._node_arange = torch.arange(max_nodes + 1, device=device, dtype=torch.long)
 
             self._selection_buf = torch.empty((r, w), dtype=torch.long, device=device)
             self.scorer.reserve(r, max_nodes, device)
 
-    def _expand_layer(self, state, layer, child_depth, origin_candidate):
+    def _expand_layer(
+        self, state, layer, child_depth, origin_candidate, confidence: BaseConfidenceContext | None = None
+    ):
         r, width = state.tokens.shape[0], state.width
         scores = layer.scores
         tokens = layer.token_ids
@@ -160,6 +174,9 @@ class TreeBuilder:
         candidate_count = scores.shape[-1]
         valid = (torch.arange(width, device=scores.device) < live).unsqueeze(-1).expand(width, candidate_count)
         flat = (parent_scores.unsqueeze(-1) + scores).masked_fill(~valid[None], float("-inf")).reshape(r, -1)
+        base_candidates = None
+        if confidence is not None:
+            base_candidates = confidence.candidates(tokens, state.frontier, valid, child_depth - 1)
         selected = flat.argsort(dim=-1, descending=True, stable=True)[:, :width].clone()
         if self.keep_origin_chain:
             present = (selected == origin_candidate[:, None]).any(-1)
@@ -169,6 +186,8 @@ class TreeBuilder:
         state.depths[:, state.num_nodes : state.num_nodes + width] = child_depth
         state.parents[:, start : start + width] = state.frontier.gather(1, selected // candidate_count)
         state.path_scores[:, start : start + width] = flat.gather(1, selected)
+        if confidence is not None:
+            confidence.record_selected(base_candidates, selected, start)
         start = state.num_nodes + 1
         frontier = self._node_arange[start : start + width].unsqueeze(0).expand(r, -1)
         return frontier, selected
@@ -181,8 +200,20 @@ class TreeBuilder:
         root_token_ids,
         draft_hidden=None,
         draft_candidate_ids=None,
+        score_summary: TreeScoreSummary | None = None,
+        full_vocab_size: int | None = None,
     ):
         r, depth, vocab = draft_logits.shape
+        if score_summary is not None and (
+            draft_candidate_ids is not None
+            or not admit_base_confidence_scorer(
+                type(self.scorer),
+                IndependentScorer,
+                DominoScorer,
+                type(full_vocab_size) is int and full_vocab_size > 0 and full_vocab_size == vocab,
+            )
+        ):
+            raise TreeLayoutError("base confidence requires an admitted scorer and full-vocabulary logits")
         width = self._frontier_width(vocab)
         capacity = self._pool_capacity(width, depth)
         if self.keep_origin_chain and self.budget < depth:
@@ -201,6 +232,11 @@ class TreeBuilder:
         state.parents.zero_()
         state.path_scores.zero_()
         state.frontier.zero_()
+        confidence = None
+        if score_summary is not None:
+            confidence = prepare_base_confidence(
+                draft_logits, full_vocab_size, self._base_path_scores_buf[:r, : capacity + 1], score_summary
+            )
         ctx = self.scorer.prepare(
             state,
             draft_logits,
@@ -219,7 +255,12 @@ class TreeBuilder:
             if self.keep_origin_chain:
                 child = layer.origin_child.expand(-1, width).gather(1, origin_frontier[:, None])[:, 0]
                 origin_candidate = origin_frontier * layer.scores.shape[-1] + child
-            state.frontier, selected = self._expand_layer(state, layer, slot + 1, origin_candidate)
+            if confidence is None:
+                state.frontier, selected = self._expand_layer(state, layer, slot + 1, origin_candidate)
+            else:
+                state.frontier, selected = self._expand_layer(
+                    state, layer, slot + 1, origin_candidate, confidence=confidence
+                )
             if self.keep_origin_chain:
                 origin_frontier = (selected == origin_candidate[:, None]).long().argmax(-1)
                 origin_pools.append(state.frontier.gather(1, origin_frontier[:, None])[:, 0])

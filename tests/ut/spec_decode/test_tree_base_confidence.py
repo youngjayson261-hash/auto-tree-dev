@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vllm-ascend project
 import importlib
+import os
 import sys
 import unittest
 from pathlib import Path
 from types import ModuleType
 
 import torch
+
+if os.environ.get("ECHO_TEST_NPU") == "1":
+    import torch_npu  # noqa: F401
 
 TREE_DIR = Path(__file__).resolve().parents[3] / "vllm_ascend/worker/v2/spec_decode/tree"
 PACKAGE = "_echo_base_confidence_test"
@@ -18,6 +22,35 @@ confidence = importlib.import_module(f"{PACKAGE}.base_confidence")
 
 
 class TestBaseConfidence(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("ECHO_TEST_NPU") == "1", "explicit NPU validation only")
+    def test_npu_matches_cpu_for_base_confidence(self):
+        results = []
+        logits_cpu = torch.tensor(
+            [[[2.0, 1.0, -torch.inf], [0.5, 1.5, 0.0]], [[0.0, 1.0, 2.0], [torch.nan, 0.0, 1.0]]],
+            dtype=torch.float16,
+        )
+        torch.npu.set_device(0)
+        for device in ("cpu", "npu:0"):
+            logits = logits_cpu.to(device)
+            paths, summary = self.buffers(rows=2, device=device)
+            ctx = confidence.prepare_base_confidence(logits, 3, paths, summary)
+            first = ctx.candidates(
+                torch.tensor([[[0, 2]], [[1, 2]]], device=device),
+                torch.zeros(2, 1, dtype=torch.long, device=device),
+                torch.ones(1, 2, dtype=torch.bool, device=device),
+                0,
+            )
+            ctx.record_selected(first, torch.tensor([[1, 0], [1, 0]], device=device), 1)
+            second = ctx.candidates(
+                torch.tensor([[[0, 1], [1, 2]], [[0, 1], [1, 2]]], device=device),
+                torch.tensor([[1, 2], [1, 2]], device=device),
+                torch.ones(2, 2, dtype=torch.bool, device=device),
+                1,
+            )
+            results.append([tensor.cpu() for tensor in (first, second, paths, *summary)])
+        for cpu, npu in zip(*results):
+            torch.testing.assert_close(cpu, npu, rtol=1e-4, atol=1e-5, equal_nan=True)
+
     def buffers(self, rows=1, depths=2, capacity=7, device="cpu"):
         return (
             torch.ones(rows, capacity, dtype=torch.float32, device=device),
