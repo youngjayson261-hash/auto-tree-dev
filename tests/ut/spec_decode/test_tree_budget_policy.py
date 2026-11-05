@@ -51,6 +51,24 @@ def runtime_facts(**changes):
 
 
 class TestBudgetPolicy(unittest.TestCase):
+    def test_base_confidence_admission(self):
+        class Independent:
+            pass
+
+        class Domino(Independent):
+            pass
+
+        class Child(Domino):
+            pass
+
+        admit = policy.admit_base_confidence_scorer
+        self.assertTrue(admit(Independent, Independent, Domino, True))
+        self.assertTrue(admit(Domino, Independent, Domino, True))
+        self.assertFalse(admit(Child, Independent, Domino, True))
+        self.assertFalse(admit(Domino, Independent, Domino, False))
+        self.assertFalse(admit(Domino, Independent, Domino, "yes"))
+        self.assertFalse(policy.admit_confidence_scorer(Domino, Independent, True))
+
     def test_layout_errors_take_priority_over_score_fallback(self):
         for changes in (
             {"invalid_scores": True},
