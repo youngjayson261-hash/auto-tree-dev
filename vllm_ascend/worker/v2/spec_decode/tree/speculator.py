@@ -15,6 +15,7 @@ from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.worker.v2.spec_decode.dflash.speculator import (
     AscendDFlashSpeculator,
 )
+from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import PolicyStatus
 from vllm_ascend.worker.v2.spec_decode.tree.builder import (
     create_tree_builder,
 )
@@ -257,6 +258,8 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             self._domino_shift_label,
         )
         self._tree_graphs: dict[int, Any] = {}
+        if self._tree_budget_enabled:
+            self.tree_budget_packet = torch.empty((self.max_num_reqs, 2), dtype=torch.int32, device=device)
 
     def packed_dsv4_verify(self) -> bool:
         """Packed ori + skip-C4 target verify (DSV4 DSpark, topk>1)."""
@@ -632,6 +635,8 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 if self._draft_graph_used:
                     self.tree_graph_stats.record_replay("draft")
                 self._finalize_tree(input_batch.num_reqs)
+                if self._tree_budget_enabled:
+                    self._write_fixed_tree_budget()
                 if self._dsv4_dspark_draft and self.topk == 1:
                     # Storage capacity is the tree budget; the chain has only K
                     # draft tokens. Never publish the padded suffix to the runner.
@@ -761,6 +766,13 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             draft_hidden=draft_hidden,
             draft_candidate_ids=draft_candidate_ids,
         )
+
+    def _write_fixed_tree_budget(self) -> None:
+        packet = self.tree_budget_packet[: self.input_batch.num_reqs]
+        stored = self.tree.num_nodes[: self.input_batch.num_reqs]
+        packet[:, 0].copy_(stored)
+        packet[:, 1].fill_(PolicyStatus.FIXED)
+        packet[:, 1].masked_fill_((stored < 0) | (stored > self.tree.depths.shape[1]), PolicyStatus.LAYOUT_ERROR)
 
     def _capture_tree_graphs(self) -> None:
         if (self._dsv4_dspark_draft and self.topk == 1) or self.tree_builder is None:
