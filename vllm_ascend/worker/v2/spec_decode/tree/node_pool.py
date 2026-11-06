@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """DSV4 node pool. Device data is indexed by immutable tree ancestry."""
 
-import os
 from math import prod
 
 import torch

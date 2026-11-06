@@ -1,24 +1,22 @@
 from vllm.triton_utils import tl, triton
 
 
-@triton.jit(
-    do_not_specialize=["num_mask", "query_len", "kv_len", "max_nodes"]
-)
+@triton.jit(do_not_specialize=["num_mask", "query_len", "kv_len", "max_nodes"])
 def tree_attention_mask_kernel(
-        mask_ptr,  # [R, 1, Q, Kv] int8
-        visibility_ptr,  # [R, B, B] int8
-        prev_kv_ptr,  # [R] int32
-        num_mask,
-        query_len,
-        kv_len,
-        max_nodes,
-        stride_mask_r,
-        stride_mask_q,
-        stride_mask_k,
-        stride_vis_r,
-        stride_vis_i,
-        BLOCK_Q: tl.constexpr,
-        BLOCK_K: tl.constexpr,
+    mask_ptr,  # [R, 1, Q, Kv] int8
+    visibility_ptr,  # [R, B, B] int8
+    prev_kv_ptr,  # [R] int32
+    num_mask,
+    query_len,
+    kv_len,
+    max_nodes,
+    stride_mask_r,
+    stride_mask_q,
+    stride_mask_k,
+    stride_vis_r,
+    stride_vis_i,
+    BLOCK_Q: tl.constexpr,
+    BLOCK_K: tl.constexpr,
 ):
     # 3D grid (q_block, k_block, req): each program fills one BLOCK_Q x BLOCK_K
     # tile of the per-request [Q, Kv] mask. This replaces the scalar Q*Kv double
@@ -58,23 +56,16 @@ def tree_attention_mask_kernel(
     in_draft = q_can_draft[:, None] & col_in_range[None, :] & k_valid[None, :]
 
     vis = tl.load(
-        visibility_ptr
-        + req * stride_vis_r
-        + vis_q_safe[:, None] * stride_vis_i
-        + draft_col_safe[None, :],
+        visibility_ptr + req * stride_vis_r + vis_q_safe[:, None] * stride_vis_i + draft_col_safe[None, :],
         mask=in_draft,
         other=0,
-        )  # [BQ, BK] int8
+    )  # [BQ, BK] int8
 
     # vis != 0 -> can attend -> 0 ; vis == 0 -> masked -> 1
     result = tl.where(in_draft & (vis != 0), 0, result)
     result = tl.where(in_draft & (vis == 0), 1, result)
 
-    out_offs = (
-            req * stride_mask_r
-            + q_offs[:, None] * stride_mask_q
-            + k_offs[None, :] * stride_mask_k
-    )
+    out_offs = req * stride_mask_r + q_offs[:, None] * stride_mask_q + k_offs[None, :] * stride_mask_k
     tl.store(mask_ptr + out_offs, result, mask=q_valid[:, None] & k_valid[None, :])
 
 
@@ -83,9 +74,9 @@ def _cdiv(a: int, b: int) -> int:
 
 
 def fill_tree_attention_mask_triton(
-        attn_mask,
-        tree_visibility,
-        prev_kv_lens,
+    attn_mask,
+    tree_visibility,
+    prev_kv_lens,
 ) -> None:
     import torch
 

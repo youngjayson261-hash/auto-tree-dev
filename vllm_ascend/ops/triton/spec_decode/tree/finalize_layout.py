@@ -41,9 +41,7 @@ def finalize_tree_layout_kernel(
             parent_id = tl.load(parent_ids_ptr + req * stride_par_r + slot)
             src = tl.where(parent_id > 0, parent_id - 1, 0)
             for j in range(slot):
-                pv = tl.load(
-                    visibility_ptr + req * stride_vis_r + src * stride_vis_i + j
-                )
+                pv = tl.load(visibility_ptr + req * stride_vis_r + src * stride_vis_i + j)
                 val = tl.where((slot > 0) & (parent_id > 0), pv, 0)
                 tl.store(
                     visibility_ptr + req * stride_vis_r + slot * stride_vis_i + j,

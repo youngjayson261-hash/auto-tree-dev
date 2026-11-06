@@ -224,18 +224,14 @@ def _promote_dflash_draft(self) -> None:
     draft = getattr(self, "draft_model_config", None)
     hf = getattr(draft, "hf_config", None) if draft is not None else None
     draft_arches = getattr(draft, "architectures", None) or () if draft is not None else ()
-    if not _hf_looks_like_dflash(hf) and not any(
-        str(arch).startswith("DFlash") for arch in draft_arches
-    ):
+    if not _hf_looks_like_dflash(hf) and not any(str(arch).startswith("DFlash") for arch in draft_arches):
         return
     self.method = "dflash"
     from vllm.transformers_utils.configs.eagle import EAGLEConfig
     from vllm.transformers_utils.configs.speculators import SpeculatorsConfig
 
     if hf is not None and not isinstance(hf, (EAGLEConfig, SpeculatorsConfig)):
-        self.draft_model_config.hf_config = EAGLEConfig(
-            hf, method="dflash", model_type="eagle"
-        )
+        self.draft_model_config.hf_config = EAGLEConfig(hf, method="dflash", model_type="eagle")
         self.update_arch_()
     self.parallel_drafting = True
 

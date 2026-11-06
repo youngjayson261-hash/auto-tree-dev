@@ -157,9 +157,7 @@ def finalize_tree_layout_from_state(
 
     kept = priority.argsort(dim=-1, descending=True, stable=True)[:, :num_nodes]
     kept_ids = (kept + 1).sort(dim=-1).values
-    old_to_new = torch.zeros(
-        (priority.shape[0], priority.shape[1] + 1), dtype=torch.long, device=priority.device
-    )
+    old_to_new = torch.zeros((priority.shape[0], priority.shape[1] + 1), dtype=torch.long, device=priority.device)
     new_ids = torch.arange(1, num_nodes + 1, device=priority.device, dtype=torch.long)
     old_to_new.scatter_(1, kept_ids, new_ids.unsqueeze(0).expand(priority.shape[0], -1))
     parent_ids = old_to_new.gather(1, state_parents.gather(1, kept_ids))

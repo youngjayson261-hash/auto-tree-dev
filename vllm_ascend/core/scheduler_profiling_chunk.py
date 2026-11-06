@@ -1160,9 +1160,8 @@ class ProfilingChunkScheduler(Scheduler):
         return scheduler_output
 
 
-from vllm_ascend.patch.platform.patch_spec_decode_stats import (
-    _patch_tree_verify_width,
-)
+# Keep patch registration after the scheduler class definition.
+from vllm_ascend.patch.platform.patch_spec_decode_stats import _patch_tree_verify_width  # noqa: E402
 
 _patch_tree_verify_width(ProfilingChunkScheduler)
 

@@ -12,7 +12,7 @@ from dataclasses import fields, is_dataclass
 from math import prod
 
 import torch
-from vllm.logger import init_logger
+from vllm.logger import logger
 from vllm.triton_utils import triton
 
 from vllm_ascend.worker.v2.spec_decode.tree import chain_pack as cp
@@ -20,8 +20,6 @@ from vllm_ascend.worker.v2.spec_decode.tree.acceptance import TreeAcceptance
 from vllm_ascend.worker.v2.spec_decode.tree.kv_binding import bind_original_kv
 from vllm_ascend.worker.v2.spec_decode.tree.kv_project import TreeKvCompact
 from vllm_ascend.worker.v2.spec_decode.tree.metrics import TreeGraphStats
-
-logger = init_logger(__name__)
 
 
 class PrefixStaging:

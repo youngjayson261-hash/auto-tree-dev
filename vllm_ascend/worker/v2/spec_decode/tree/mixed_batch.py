@@ -34,10 +34,18 @@ class TreePhase:
         req = self.request_indices
         cpu_req = self.request_indices_cpu
         for name in (
-            "seq_lens", "seq_lens_cpu", "seq_lens_cpu_upper_bound",
-            "_seq_lens_cpu", "num_computed_tokens_cpu", "_num_computed_tokens_cpu",
-            "is_prefilling", "req_ids_tensor", "req_topk_buffer_slots",
-            "req_topk_buffer_active", "replay_start", "encoder_seq_lens",
+            "seq_lens",
+            "seq_lens_cpu",
+            "seq_lens_cpu_upper_bound",
+            "_seq_lens_cpu",
+            "num_computed_tokens_cpu",
+            "_num_computed_tokens_cpu",
+            "is_prefilling",
+            "req_ids_tensor",
+            "req_topk_buffer_slots",
+            "req_topk_buffer_active",
+            "replay_start",
+            "encoder_seq_lens",
             "tree_visibility",
         ):
             value = getattr(original, name, None)
@@ -71,7 +79,8 @@ class TreePhase:
         if original.token_to_req is not None:
             result.token_to_req = torch.repeat_interleave(
                 torch.arange(self.num_reqs, dtype=original.token_to_req.dtype, device=req.device),
-                torch.diff(self.query_start_loc), output_size=self.num_tokens,
+                torch.diff(self.query_start_loc),
+                output_size=self.num_tokens,
             )
         result.query_start_loc = self.query_start_loc
         result.query_start_loc_cpu = self.query_start_loc_cpu
@@ -107,7 +116,7 @@ class TreeMixedBatch:
         # All decisions use the runner's existing CPU metadata. Device values
         # are only gathered later using these immutable per-round indices.
         n = batch.num_reqs
-        qsl = batch.query_start_loc_np[:n + 1]
+        qsl = batch.query_start_loc_np[: n + 1]
         phases = batch.is_prefilling_np[:n]
         uploads = []
 
@@ -134,11 +143,15 @@ class TreeMixedBatch:
                 host_buffers=uploads,
             )
             return TreePhase(
-                req, tok, cu,
+                req,
+                tok,
+                cu,
                 torch.tensor(request_ids, dtype=torch.long, device="cpu"),
                 torch.tensor(token_ids, dtype=torch.long, device="cpu"),
                 torch.tensor(boundaries, dtype=torch.int32, device="cpu"),
-                drop, torch.tensor(omitted, dtype=torch.int32, device="cpu"), prefilling,
+                drop,
+                torch.tensor(omitted, dtype=torch.int32, device="cpu"),
+                prefilling,
             )
 
         decode, prefill = build(False), build(True)
