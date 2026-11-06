@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from torch import Tensor
 
+    from .layout import TreeLayout
+
 
 class PolicyStatus(IntEnum):
     FIXED = 0
@@ -188,3 +190,108 @@ def validate_runtime_facts(
     failures = tuple(name for passed, name in checks if not passed)
     if failures:
         raise ValueError("confidence unsupported: " + ",".join(failures))
+
+
+def select_tree_prefix_device(
+    layout: TreeLayout,
+    summary: TreeScoreSummary,
+    packet_out: Tensor,
+    *,
+    tau: float,
+    bootstrap_mask: Tensor,
+) -> None:
+    """Publish non-root A/status without reading device values on the host.
+
+    ``packet_out`` is the active ``[R, 2]`` view of the caller's persistent
+    int32 packet. Layout and D03 summary buffers may have additional capacity
+    rows, which are ignored. Column views need not be contiguous.
+
+    Layout errors publish A=0 and must stop the caller before verification.
+    Only valid, non-bootstrap confidence rows can trigger batch score fallback.
+    This selector does not alter the original tree, summary, or KV state.
+    """
+    import torch
+
+    validate_policy_config("confidence", tau)
+    if packet_out.ndim != 2 or packet_out.shape[1] != 2 or packet_out.dtype != torch.int32:
+        raise ValueError("packet_out must be int32[R, 2]")
+    r = packet_out.shape[0]
+    if layout.depths.ndim != 2 or layout.parents.shape != layout.depths.shape:
+        raise ValueError("depths and parents must share [capacity_R, B]")
+    if layout.depths.shape[0] < r:
+        raise ValueError("layout has insufficient request rows")
+    if layout.num_nodes.ndim != 1 or layout.num_nodes.shape[0] < r:
+        raise ValueError("num_nodes must provide one count per active request")
+    integer_types = (torch.int32, torch.int64)
+    layout_fields = (layout.depths, layout.parents, layout.num_nodes)
+    if any(value.dtype not in integer_types for value in layout_fields):
+        raise ValueError("layout counts and indices must be integral")
+    device = packet_out.device
+    if any(value.device != device for value in layout_fields):
+        raise ValueError("layout and packet devices differ")
+    if r == 0:
+        return
+
+    depths, parents = layout.depths[:r], layout.parents[:r]
+    s = layout.num_nodes[:r]
+    s32 = s.to(torch.int32)
+    b = depths.shape[1]
+    node_ids = torch.arange(1, b + 1, device=device, dtype=torch.int64).unsqueeze(0)
+    valid_nodes = node_ids <= s.unsqueeze(1)
+    parent_depths = torch.cat((torch.zeros((r, 1), dtype=depths.dtype, device=device), depths), dim=1)
+    parent_depth = parent_depths.gather(1, parents.clamp(0, b).to(torch.int64))
+    bad_nodes = ((depths < 1) | (parents < 0) | (parents >= node_ids) | (depths != parent_depth + 1)) & valid_nodes
+    bad_layout = (s < 0) | (s > b) | bad_nodes.any(dim=1)
+    if b > 1:
+        bad_layout = bad_layout | ((depths[:, 1:] < depths[:, :-1]) & valid_nodes[:, 1:]).any(dim=1)
+
+    if tau == 0:
+        packet_out[:, 0].copy_(torch.where(bad_layout, 0, s32))
+        status = torch.full((r,), int(PolicyStatus.FIXED), dtype=torch.int32, device=device)
+        status.masked_fill_(bad_layout, int(PolicyStatus.LAYOUT_ERROR))
+        packet_out[:, 1].copy_(status)
+        return
+
+    maxima, valid_all, invalid_all = summary
+    if maxima.ndim != 2 or valid_all.shape != maxima.shape or maxima.shape[0] < r:
+        raise ValueError("invalid score-summary shape")
+    if maxima.dtype != torch.float32 or valid_all.dtype != torch.bool:
+        raise ValueError("score-summary dtypes must be float32/bool")
+    if invalid_all.ndim != 1 or invalid_all.shape[0] < r or invalid_all.dtype != torch.bool:
+        raise ValueError("invalid_scores must be bool[capacity_R]")
+    if bootstrap_mask.ndim != 1 or bootstrap_mask.shape[0] < r or bootstrap_mask.dtype != torch.bool:
+        raise ValueError("bootstrap_mask must be bool[capacity_R]")
+    if any(value.device != device for value in (maxima, valid_all, invalid_all, bootstrap_mask)):
+        raise ValueError("summary/mask and packet devices differ")
+    m, valid = maxima[:r], valid_all[:r]
+    bootstrap = bootstrap_mask[:r]
+    confidence = ~bootstrap
+    dmax = m.shape[1]
+    has_depths = valid.any(dim=1)
+    bad_scores = invalid_all[:r] | ((s > 0) & ~has_depths)
+    if dmax == 0:
+        retained_depth = torch.zeros(r, dtype=torch.int32, device=device)
+    else:
+        depth_prefix = torch.cumprod(valid.to(torch.int32), dim=1, dtype=torch.int32)
+        summary_hole = (valid & (depth_prefix == 0)).any(dim=1)
+        depth_valid = valid.gather(1, (depths.clamp(1, dmax) - 1).to(torch.int64))
+        insufficient_depths = (valid_nodes & ((depths > dmax) | ~depth_valid)).any(dim=1)
+        bad_layout = bad_layout | (confidence & (summary_hole | (has_depths & insufficient_depths)))
+        bad_values = torch.isnan(m) | torch.isposinf(m) | (m > 0)
+        bad_scores = bad_scores | (bad_values & valid).any(dim=1)
+        # Round log(tau), not tau: tiny positive host thresholds must not underflow.
+        threshold = c_float(math.log(tau)).value
+        passed = valid & (m >= threshold)
+        retained_depth = torch.cumprod(passed.to(torch.int32), dim=1, dtype=torch.int32).sum(dim=1, dtype=torch.int32)
+
+    a = (valid_nodes & (depths <= retained_depth.unsqueeze(1))).sum(dim=1, dtype=torch.int32)
+    fallback_batch = (bad_scores & confidence & ~bad_layout).any()
+    fallback_rows = confidence & ~bad_layout & fallback_batch
+    a = torch.where(bootstrap | fallback_rows, s32, a)
+    a = torch.where(bad_layout, 0, a)
+    status = torch.full((r,), int(PolicyStatus.CONFIDENCE), dtype=torch.int32, device=device)
+    status = torch.where(bootstrap, int(PolicyStatus.BOOTSTRAP_FIXED), status)
+    status = torch.where(fallback_rows, int(PolicyStatus.SCORE_FALLBACK), status)
+    status = torch.where(bad_layout, int(PolicyStatus.LAYOUT_ERROR), status)
+    packet_out[:, 0].copy_(a)
+    packet_out[:, 1].copy_(status)
