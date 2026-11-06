@@ -47,6 +47,7 @@ class AscendRequestState(RequestState):
         # Ascend attention needs a torch CPU view of the upstream NumPy state.
         # Sharing storage keeps both APIs coherent without duplicate writes.
         self.num_computed_tokens_cpu: torch.Tensor = torch.from_numpy(self.num_computed_tokens_np)
+        self.tree_next_budget_cpu: list[int | None] = [None] * self.max_num_reqs
 
         if tree_shape is not None:
             max_nodes = tree_shape.budget
@@ -95,6 +96,7 @@ class AscendRequestState(RequestState):
 
     def add_request(self, req_id, *args, **kwargs):
         result = super().add_request(req_id, *args, **kwargs)
+        self.tree_next_budget_cpu[self.req_id_to_index[req_id]] = None
         if hasattr(self, "tree_num_nodes"):
             idx = self.req_id_to_index[req_id]
             self.tree_num_nodes[idx] = 0
@@ -104,3 +106,9 @@ class AscendRequestState(RequestState):
             self.tree_first_child[idx].fill_(-1)
             self.tree_next_sibling[idx].fill_(-1)
         return result
+
+    def remove_request(self, req_id):
+        idx = super().remove_request(req_id)
+        if idx is not None:
+            self.tree_next_budget_cpu[idx] = None
+        return idx

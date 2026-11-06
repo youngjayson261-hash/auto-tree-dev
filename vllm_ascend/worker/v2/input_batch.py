@@ -100,6 +100,7 @@ class AscendInputBatch(InputBatch):
     slot_positions: torch.Tensor | None = None
     path_node_ids: torch.Tensor | None = None
     tree_acceptance: "TreeAcceptance | None" = None
+    tree_verified_counts_cpu: list[int] | None = None
     # attn_state is used to build attention metadata.
     attn_state: AscendAttentionState | None = None
     is_dummy: bool = False
@@ -184,6 +185,7 @@ class AscendInputBatch(InputBatch):
             seq_lens_np=seq_lens_np,
             attn_state=(AscendAttentionState.PrefillNoCache if is_cpp_profile else AscendAttentionState.DecodeOnly),
             is_dummy=True,
+            tree_verified_counts_cpu=None,
             is_cpp_profile=is_cpp_profile,
         )
 
