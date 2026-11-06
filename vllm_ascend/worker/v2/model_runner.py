@@ -153,6 +153,7 @@ class NPUModelRunner(GPUModelRunner):
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
         # Ascend-specific configurations
         self.ascend_config = get_ascend_config()
+        self._tree_budget_enabled = self.ascend_config.tree_spec_config.confidence_verification_enabled
         self.sparse_kv_offload_manager = None
         self.kvpp = KVPPRuntime()
         # Adaptive verification uses this flag to apply FIA-specific query
@@ -368,6 +369,68 @@ class NPUModelRunner(GPUModelRunner):
             self.tree_commit = TreeCommitCoordinator(self)
             self.speculator.tree_commit = self.tree_commit
 
+        self._validate_tree_confidence_runtime()
+
+    def _validate_tree_confidence_runtime(self, sampling_params=()) -> None:
+        if not self._tree_budget_enabled:
+            return
+
+        # Import confidence-only model bindings after native model loading.
+        from vllm.sampling_params import SamplingType
+        from vllm.v1.worker.gpu.sample.sampler import BadWordsState, LogitBiasState, PenaltiesState
+
+        from vllm_ascend.models.qwen3_domino import AscendDominoQwen3ForCausalLM
+        from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import (
+            admit_base_confidence_scorer,
+            validate_runtime_facts,
+        )
+        from vllm_ascend.worker.v2.spec_decode.tree.scoring import DominoScorer, IndependentScorer
+
+        speculator = self.speculator
+        model = speculator.model
+        expected_vocab = model.config.vocab_size if type(model) is AscendDominoQwen3ForCausalLM else None
+        full_vocab = (
+            expected_vocab is not None
+            and model.draft_vocab_size == expected_vocab
+            and model.draft_id_to_target_id is None
+            and model.logits_processor.vocab_size == expected_vocab
+            and model.logits_processor.org_vocab_size == expected_vocab
+        )
+        admitted = admit_base_confidence_scorer(
+            type(speculator.tree_builder.scorer), IndependentScorer, DominoScorer, bool(full_vocab)
+        )
+        processors_supported = (
+            tuple(type(p) for p in self.sampler.logits_processors) == (LogitBiasState, PenaltiesState, BadWordsState)
+            and not self.sampler.thinking_budget_state.enabled
+            and self.sampler.trace_replay_state is None
+            and all(
+                p.presence_penalty == 0
+                and p.frequency_penalty == 0
+                and p.repetition_penalty == 1
+                and p.min_tokens == 0
+                and not p.logit_bias
+                and not p.allowed_token_ids
+                and not p.bad_words
+                for p in sampling_params
+            )
+        )
+        cfg = self.vllm_config
+        validate_runtime_facts(
+            async_scheduling=cfg.scheduler_config.async_scheduling,
+            tp=cfg.parallel_config.tensor_parallel_size,
+            pp=cfg.parallel_config.pipeline_parallel_size,
+            max_concurrent_batches=cfg.max_concurrent_batches,
+            bonus_count=self.model_state.num_new_sampled_tokens_per_step,
+            enforce_eager=cfg.model_config.enforce_eager,
+            tree_graph_present=bool(speculator._tree_graphs),
+            adaptive_manager_present=self.adaptive_verification is not None or speculator.enable_adaptive_verification,
+            greedy=all(p.sampling_type == SamplingType.GREEDY for p in sampling_params),
+            grammar=any(p.structured_outputs is not None for p in sampling_params),
+            processors_supported=processors_supported,
+            scorer_admitted=admitted,
+        )
+        speculator._tree_full_vocab_size = expected_vocab
+
     def _restore_replicated_draft_target_states(self) -> None:
         """Restore target states consumed by a replicated PCP draft."""
         state = self.execute_model_state
@@ -471,6 +534,10 @@ class NPUModelRunner(GPUModelRunner):
         return output
 
     def add_requests(self, scheduler_output: SchedulerOutput) -> None:
+        if self._tree_budget_enabled:
+            self._validate_tree_confidence_runtime(
+                tuple(req.sampling_params for req in scheduler_output.scheduled_new_reqs)
+            )
         super().add_requests(scheduler_output)
         if self.tree_host_metadata is not None:
             self.tree_host_metadata.add_requests(scheduler_output.scheduled_new_reqs)

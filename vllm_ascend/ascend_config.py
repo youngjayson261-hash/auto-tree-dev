@@ -1335,11 +1335,19 @@ class TreeSpecConfig:
     candidate_size: int | None = 64
     depth_penalty: float | None = None
     keep_origin_chain: bool = False
+    verification_policy: str = "fixed"
+    verification_threshold: float = 0.0
+
+    @property
+    def confidence_verification_enabled(self) -> bool:
+        return self.enabled and self.verification_policy == "confidence" and self.verification_threshold > 0
 
     @model_validator(mode="before")
     @classmethod
     def _reject_removed_options(cls, value):
         options = value.kwargs if isinstance(value, ArgsKwargs) else value
+        if isinstance(options, dict) and isinstance(options.get("verification_threshold"), bool):
+            raise ValueError("verification_threshold must be a number, not bool")
         if isinstance(options, dict) and ("method" in options or "params" in options):
             raise ValueError(
                 "tree_spec_config.method/params were removed: the draft model selects "
@@ -1359,6 +1367,12 @@ class TreeSpecConfig:
             raise ValueError("tree_spec_config.candidate_size must be >= 1")
         if self.depth_penalty is not None and (not math.isfinite(self.depth_penalty) or self.depth_penalty < 0):
             raise ValueError("tree_spec_config.depth_penalty must be finite and >= 0")
+        if (self.verification_policy, self.verification_threshold) != ("fixed", 0.0):
+            # Loading the worker package while ascend_config initializes creates
+            # a cycle. Keep the legacy defaults free of that dependency.
+            from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import validate_policy_config
+
+            validate_policy_config(self.verification_policy, self.verification_threshold)
         return self
 
     def _validate_backend(self, vllm_config):

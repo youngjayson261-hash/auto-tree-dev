@@ -107,6 +107,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             raise ValueError("DFlash tree speculator needs full draft logits; disable use_local_argmax_reduction.")
 
         tree_cfg = get_ascend_config().tree_spec_config
+        self._tree_budget_enabled = tree_cfg.confidence_verification_enabled
         self.budget = tree_cfg.budget
         self.topk = tree_cfg.topk
         self.candidate_size = tree_cfg.candidate_size
@@ -745,6 +746,9 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         else:
             logits = self.model.compute_logits(sample_hidden_states)
         logits = logits.view(num_reqs, self.num_speculative_steps, -1)
+        if self._tree_budget_enabled:
+            if draft_candidate_ids is not None or logits.shape[-1] != self._tree_full_vocab_size:
+                raise ValueError("confidence requires full base-vocabulary logits")
         if draft_candidate_ids is not None:
             draft_candidate_ids = draft_candidate_ids.view(num_reqs, self.num_speculative_steps, -1)
         layout = self._load_layout_from_buffers(num_reqs)
