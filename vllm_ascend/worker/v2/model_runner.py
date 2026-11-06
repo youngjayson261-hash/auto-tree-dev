@@ -264,7 +264,13 @@ class NPUModelRunner(GPUModelRunner):
             # the K-wide draft-generation contract, while its scheduler adapter
             # consumes the handler's S-wide placeholder publication.
             with torch_cuda_wrapper():
-                self.draft_tokens_handler = TreeDraftTokensHandler(self.device, self.req_states, self.speculator)
+                self.draft_tokens_handler = TreeDraftTokensHandler(
+                    self.device,
+                    self.req_states,
+                    self.speculator,
+                    verification_policy=self.ascend_config.tree_spec_config.verification_policy,
+                    threshold=self.ascend_config.tree_spec_config.verification_threshold,
+                )
         # AscendInputBuffers has extra `seq_lens_cpu` attribute.
         # so reinitialize input_buffers here.
         self.input_buffers: AscendInputBuffers = AscendInputBuffers(
@@ -518,6 +524,7 @@ class NPUModelRunner(GPUModelRunner):
             self.req_states.tree_num_nodes[idx] = tree.num_nodes
             self.req_states.tree_first_child[idx] = tree.first_child
             self.req_states.tree_next_sibling[idx] = tree.next_sibling
+            self.draft_tokens_handler.seal_budget_production()
         # Close the per-step msprobe dump cycle on the normal last-PP-rank
         # path (v1 parity: v1 finalizes at the end of sample_tokens).
         self._finalize_dump_data()
