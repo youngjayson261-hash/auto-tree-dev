@@ -549,6 +549,35 @@ class NPUModelRunner(GPUModelRunner):
         if self.tree_host_metadata is not None:
             self.tree_host_metadata.add_requests(scheduler_output.scheduled_new_reqs)
 
+    def _tree_verified_counts(
+        self, scheduler_output: SchedulerOutput, batch_req_state: BatchReqState
+    ) -> list[int] | None:
+        if not self._tree_budget_enabled:
+            return None
+        counts = []
+        drafts = scheduler_output.scheduled_spec_decode_tokens
+        for req_id, slot, prefill, query_len in zip(
+            batch_req_state.req_ids,
+            batch_req_state.idx_mapping_np,
+            batch_req_state.is_prefilling_np,
+            batch_req_state.num_scheduled_tokens,
+            strict=True,
+        ):
+            verified = len(drafts.get(req_id, ()))
+            available = self.req_states.tree_next_budget_cpu[int(slot)]
+            if available is None:
+                if not prefill or verified:
+                    raise ValueError("confidence decode budget is missing")
+            elif type(available) is not int or not 0 <= verified <= available <= self.speculator.budget:
+                raise ValueError("confidence verified prefix exceeds available budget")
+            if prefill:
+                if verified:
+                    raise ValueError("confidence prefill cannot verify a draft budget")
+            elif int(query_len) != 1 + verified:
+                raise ValueError("confidence decode query must contain root plus verified prefix")
+            counts.append(verified)
+        return counts
+
     def update_requests(self, scheduler_output: SchedulerOutput) -> None:
         super().update_requests(scheduler_output)
         if self.tree_host_metadata is not None:
@@ -1010,6 +1039,8 @@ class NPUModelRunner(GPUModelRunner):
 
         req_ids = batch_req_state.req_ids
 
+        tree_verified_counts = self._tree_verified_counts(scheduler_output, batch_req_state)
+
         self._update_seq_lens_cpu(scheduler_output, req_ids)
 
         num_scheduled_tokens_np = batch_req_state.num_scheduled_tokens
@@ -1246,6 +1277,7 @@ class NPUModelRunner(GPUModelRunner):
             prefill_len_np=batch_req_state.prefill_len_np,
             num_computed_prefill_tokens_np=batch_req_state.num_computed_prefill_tokens_np,
             is_prefilling_np=batch_req_state.is_prefilling_np,
+            tree_verified_counts_cpu=tree_verified_counts,
             has_prefill=batch_req_state.has_prefill,
             decode_graph_eligible=batch_req_state.decode_graph_eligible,
             prefill_runs_as_decode_np=batch_req_state.prefill_runs_as_decode_np,
@@ -1405,6 +1437,10 @@ class NPUModelRunner(GPUModelRunner):
         """Override GPUModelRunner.sample for lmhead TP: every rank must feed
         compute_logits the same row count — pad up to ``_lmhead_tp_max_num_logits()``
         and trim back; prompt_logprobs stays unsupported (same as V1)."""
+        if self._tree_budget_enabled and input_batch.num_draft_tokens == 0:
+            input_batch.tree_acceptance = None
+            if self.rejection_sampler is not None:
+                self.rejection_sampler.acceptance = None
         if not lmhead_tp_enable():
             return super().sample(hidden_states, input_batch, grammar_output)
 
