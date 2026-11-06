@@ -284,7 +284,14 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
         is_profile: bool = False,
         num_speculative_tokens: int | None = None,
+        *,
+        dp_sync: Any = None,
     ) -> torch.Tensor:
+        # vLLM 0.31 names the same synchronization state ``dp_sync``.
+        if dp_sync is not None:
+            if dp_sync_state is not None and dp_sync_state is not dp_sync:
+                raise ValueError("Conflicting dp_sync and dp_sync_state values")
+            dp_sync_state = dp_sync
         if num_speculative_tokens not in (None, 0, self.num_speculative_steps):
             raise ValueError(
                 "Tree speculation requires a fixed draft depth; dynamic speculative token counts are not supported."
