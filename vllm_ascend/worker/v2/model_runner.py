@@ -397,7 +397,7 @@ class NPUModelRunner(GPUModelRunner):
         expected_vocab = model.config.vocab_size if type(model) is AscendDominoQwen3ForCausalLM else None
         full_vocab = (
             expected_vocab is not None
-            and model.draft_vocab_size == expected_vocab
+            and model.config.draft_vocab_size == expected_vocab
             and model.draft_id_to_target_id is None
             and model.logits_processor.vocab_size == expected_vocab
             and model.logits_processor.org_vocab_size == expected_vocab

@@ -12,6 +12,7 @@ from vllm.v1.worker.gpu.input_batch import InputBatch
 from vllm.v1.worker.gpu.spec_decode.dspark.speculator import DSparkSpeculator
 
 from vllm_ascend.ascend_config import get_ascend_config
+from vllm_ascend.utils import vllm_version_is
 from vllm_ascend.worker.v2.spec_decode.dflash.speculator import (
     AscendDFlashSpeculator,
 )
@@ -521,11 +522,21 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
         is_profile: bool = False,
         num_speculative_tokens: int | None = None,
+        *,
+        dp_sync: Any = None,
     ) -> torch.Tensor:
+        # vLLM 0.31 names the same synchronization state ``dp_sync``.
+        if dp_sync is not None:
+            if dp_sync_state is not None and dp_sync_state is not dp_sync:
+                raise ValueError("Conflicting dp_sync and dp_sync_state values")
+            dp_sync_state = dp_sync
         if num_speculative_tokens is not None and num_speculative_tokens != self.num_speculative_steps:
             raise ValueError(
                 "Tree speculation requires a fixed draft depth; dynamic speculative token counts are not supported."
             )
+        parent_kwargs: dict[str, Any] = {"is_profile": is_profile}
+        if not vllm_version_is("0.31.0"):
+            parent_kwargs["num_speculative_tokens"] = num_speculative_tokens
         from vllm_ascend.worker.v2.spec_decode.tree import chain_pack
         from vllm_ascend.worker.v2.spec_decode.tree.chain_pack import (
             clear_tree_chain_layout,
@@ -606,8 +617,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                         dummy_run,
                         skip_attn_for_dummy_run,
                         mm_inputs,
-                        is_profile=is_profile,
-                        num_speculative_tokens=num_speculative_tokens,
+                        **parent_kwargs,
                     )
             else:
                 tokens = super().propose(
@@ -626,8 +636,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                     dummy_run,
                     skip_attn_for_dummy_run,
                     mm_inputs,
-                    is_profile=is_profile,
-                    num_speculative_tokens=num_speculative_tokens,
+                    **parent_kwargs,
                 )
             # FULL replay only runs draft forward; tree construction has its own graph.
             if not dummy_run:
