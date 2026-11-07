@@ -530,6 +530,7 @@ class AscendModelState(DefaultModelState):
             and dflash_tree_spec_enabled(self.vllm_config)
             and dummy_tree_mask_for_capture(num_input_tokens, num_reqs)
         ):
+            from vllm_ascend.ascend_config import get_ascend_config
             from vllm_ascend.attention.tree_spec import (
                 dummy_tree_visibility,
                 is_draft_forward,

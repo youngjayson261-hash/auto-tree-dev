@@ -37,7 +37,6 @@ def _generate_attn_mask(max_seq_len, dtype):
     attn_mask = torch.zeros(size=(max_seq_len, max_seq_len), dtype=dtype).masked_fill_(mask_flag, mask_value)
     return attn_mask
 
-
 def align_up(value, alignment=128):
     return ((value + alignment - 1) // alignment) * alignment
 
@@ -80,13 +79,14 @@ def tree_fia_bsnd_shape(num_tokens: int) -> tuple[int, int] | None:
     return tree_verify_shape(num_tokens)
 
 
-def _seq_lens_are_tree_query(seq_lens: torch.Tensor | None, num_decode: int) -> bool:
+def _seq_lens_are_tree_query(
+    seq_lens: torch.Tensor | None, num_decode: int
+) -> bool:
     return seq_lens_are_tree_query(seq_lens, num_decode)
 
 
 def _need_dummy_tree_mask_for_capture() -> bool:
     return need_dummy_tree_visibility_for_capture()
-
 
 @singleton
 class AttentionMaskBuilder:
@@ -103,10 +103,14 @@ class AttentionMaskBuilder:
         # this buffer; do not return a temporary cat/contiguous tensor.
         self._tree_fia_bsnd: torch.Tensor | None = None
 
-    def configure_tree_mask(self, max_num_decode: int, query_len: int, kv_len: int) -> None:
+    def configure_tree_mask(
+        self, max_num_decode: int, query_len: int, kv_len: int
+    ) -> None:
         """Pin max mask shape from VllmConfig (capture does not always have it)."""
         self._tree_spec_caps = (max_num_decode, query_len, kv_len)
-        self._tree_fia_bsnd = torch.empty(max_num_decode, query_len, kv_len, dtype=torch.bool, device=self.device)
+        self._tree_fia_bsnd = torch.empty(
+            max_num_decode, query_len, kv_len, dtype=torch.bool, device=self.device
+        )
 
     def _sync_tree_fia_bsnd(self, num_decode: int, query_len: int, kv_len: int) -> None:
         """Copy 4D [B, 1, Q, KV] into the 3D FIA buffer before graph replay.
@@ -157,7 +161,9 @@ class AttentionMaskBuilder:
         src_b, src_q, src_kv = src.shape
         if src_q < q_len:
             return None
-        self._tree_fia_bsnd = torch.empty(max(batch_size, src_b), src_q, src_kv, dtype=src.dtype, device=src.device)
+        self._tree_fia_bsnd = torch.empty(
+            max(batch_size, src_b), src_q, src_kv, dtype=src.dtype, device=src.device
+        )
         n = min(src_b, batch_size)
         self._tree_fia_bsnd[:n, :src_q, :src_kv].copy_(src[:n])
         if n < batch_size:
@@ -183,16 +189,14 @@ class AttentionMaskBuilder:
             )
         return self.chunked_prefill_attn_mask
 
-    def get_attention_mask(
-        self,
-        causal: bool,
-        model_config: ModelConfig,
-        tree_visibility: torch.Tensor | None = None,
-        seq_lens: torch.Tensor | None = None,
-        num_decode: int = 0,
-        num_tokens: int = 0,
-        for_capture: bool = False,
-    ):
+    def get_attention_mask(self, causal: bool,
+                           model_config: ModelConfig,
+                           tree_visibility: torch.Tensor | None = None,
+                           seq_lens: torch.Tensor | None = None,
+                           num_decode: int = 0,
+                           num_tokens: int = 0,
+                           for_capture: bool = False,
+                           ):
         if not causal:
             # FIA applies any provided mask as defaultMask (sparse_mode=0),
             # which would wrongly mask out the upper triangle for
@@ -203,11 +207,19 @@ class AttentionMaskBuilder:
             return None
 
         if num_decode > 0:
-            tree_shaped = num_tokens > 0 and dummy_tree_mask_for_capture(num_tokens, num_decode)
-            if tree_visibility is None and (
-                tree_shaped
-                if for_capture
-                else (need_dummy_tree_visibility_for_capture() and seq_lens_are_tree_query(seq_lens, num_decode))
+            tree_shaped = (
+                num_tokens > 0 and dummy_tree_mask_for_capture(num_tokens, num_decode)
+            )
+            if (
+                tree_visibility is None
+                and (
+                    tree_shaped
+                    if for_capture
+                    else (
+                        need_dummy_tree_visibility_for_capture()
+                        and seq_lens_are_tree_query(seq_lens, num_decode)
+                    )
+                )
             ):
                 tree_visibility = dummy_tree_visibility(num_decode, self.device)
             if tree_visibility is not None:
@@ -215,14 +227,18 @@ class AttentionMaskBuilder:
                 # 2D splitfuse mask. TND + sparse 3 rejects a 4D tree mask.
                 if for_capture and not tree_shaped:
                     return self.get_splitfuse_attn_mask()
-                return self.get_tree_attention_mask(tree_visibility, seq_lens, num_decode)
+                return self.get_tree_attention_mask(
+                    tree_visibility, seq_lens, num_decode
+                )
 
         if model_config.runner_type == "pooling":
             return self.get_attn_mask(2048, torch.bool)
 
         return self.get_splitfuse_attn_mask()
 
-    def get_tree_attention_mask(self, tree_visibility: torch.Tensor, seq_lens: torch.Tensor, num_decode):
+    def get_tree_attention_mask(self, tree_visibility: torch.Tensor,
+                                seq_lens: torch.Tensor,
+                                num_decode):
         max_nodes = tree_visibility.shape[-1]
         query_len = 1 + max_nodes
         max_caps = self._resolved_tree_caps()
@@ -249,7 +265,9 @@ class AttentionMaskBuilder:
             or alloc_kv > cap_kv
             or self._tree_attn_mask.device != self.device
         ):
-            self._tree_attn_mask = torch.empty(alloc_b, 1, alloc_q, alloc_kv, dtype=torch.bool, device=self.device)
+            self._tree_attn_mask = torch.empty(
+                alloc_b, 1, alloc_q, alloc_kv, dtype=torch.bool, device=self.device
+            )
             self._tree_mask_caps = (alloc_b, alloc_q, alloc_kv)
             cap_kv = alloc_kv
         # Use the allocated KV width so graph capture binds a fixed shape.
@@ -266,7 +284,9 @@ class AttentionMaskBuilder:
             if prev.device != self.device:
                 prev = prev.to(self.device, non_blocking=True)  # H2D
             prev = prev - query_len
-            fill_tree_attention_mask_triton(mask_slice, tree_visibility[:num_mask], prev)
+            fill_tree_attention_mask_triton(
+                mask_slice, tree_visibility[:num_mask], prev
+            )
             if num_decode > num_mask:
                 attn_mask[num_mask:].fill_(True)
             self._sync_tree_fia_bsnd(num_decode, query_len, cap_kv)

@@ -6,9 +6,9 @@
 namespace optiling {
 static ge::graphStatus Tile(gert::TilingContext *ctx) {
     auto attrs = ctx->GetAttrs();
-    const auto &ancestor_shape = ctx->GetInputShape(7)->GetStorageShape();
+    const auto &anc = ctx->GetInputShape(7)->GetStorageShape();
     const auto &state = ctx->GetInputShape(0)->GetStorageShape();
-    uint32_t n = ancestor_shape.GetDim(0), dim = ctx->GetInputShape(2)->GetStorageShape().GetDim(0);
+    uint32_t n = anc.GetDim(0), dim = ctx->GetInputShape(2)->GetStorageShape().GetDim(0);
     uint32_t ratio = *attrs->GetInt(0), rope = *attrs->GetInt(1);
     if (!n || (dim != 128 && dim != 512) || (ratio != 4 && ratio != 128) || rope != 64) return ge::GRAPH_FAILED;
     platform_ascendc::PlatformAscendC platform(ctx->GetPlatformInfo());
@@ -17,7 +17,7 @@ static ge::graphStatus Tile(gert::TilingContext *ctx) {
     t.set_n(n); t.set_dim(dim); t.set_ratio(ratio); t.set_rope(rope);
     t.set_block(state.GetDim(1));
     t.set_width(ctx->GetInputShape(5)->GetStorageShape().GetDim(1));
-    t.set_maxDepth(ancestor_shape.GetDim(1)); t.set_cores(cores);
+    t.set_maxDepth(anc.GetDim(1)); t.set_cores(cores);
     t.set_pageStride(*attrs->GetInt(3)); t.set_rowStride(*attrs->GetInt(4));
     t.set_cosStride(*attrs->GetInt(5)); t.set_sinStride(*attrs->GetInt(6));
     t.set_eps(*attrs->GetFloat(2));

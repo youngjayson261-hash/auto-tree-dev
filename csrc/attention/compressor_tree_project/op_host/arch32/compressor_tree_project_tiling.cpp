@@ -223,7 +223,7 @@ ge::graphStatus CompressorTreeProjectTiling::SetTreeAggInfo()
                     OPS_REPORT_VECTOR_INNER_ERR(context_->opName,
                                                 "tree aggregation fusion requires TH BF16 x"),
                     return ge::GRAPH_FAILED);
-        auto &ancestor_shape = context_->ancestors.shape->GetStorageShape();
+        auto &anc = context_->ancestors.shape->GetStorageShape();
         auto &state = context_->stateReal.shape->GetStorageShape();
         auto &table = context_->treeAggTable.shape->GetStorageShape();
         OP_CHECK_IF(context_->prefix.shape->GetStorageShape().GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_0) !=
@@ -232,7 +232,7 @@ ge::graphStatus CompressorTreeProjectTiling::SetTreeAggInfo()
                         baseParams_->batchSize ||
                     context_->requests.shape->GetStorageShape().GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_0) !=
                         baseParams_->batchSize ||
-                    ancestor_shape.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_0) != baseParams_->batchSize ||
+                    anc.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_0) != baseParams_->batchSize ||
                     state.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_1) == 0 ||
                     table.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_1) == 0 ||
                     context_->treeAggNorm.shape->GetStorageShape().GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_0) !=
@@ -245,7 +245,7 @@ ge::graphStatus CompressorTreeProjectTiling::SetTreeAggInfo()
         treeAggParams_->dim = baseParams_->headDim;
         treeAggParams_->block = state.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_1);
         treeAggParams_->width = table.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_1);
-        treeAggParams_->maxDepth = ancestor_shape.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_1);
+        treeAggParams_->maxDepth = anc.GetDim(COMPRESSOR_TREE_PROJECT_DIM_INDEX_1);
         treeAggParams_->pageStride = static_cast<uint64_t>(*context_->treeAggPageStride);
         treeAggParams_->rowStride = static_cast<uint64_t>(*context_->treeAggRowStride);
         treeAggParams_->cosStride = static_cast<uint64_t>(*context_->treeAggCosStride);

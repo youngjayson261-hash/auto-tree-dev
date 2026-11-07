@@ -264,16 +264,10 @@ class AscendIndexerOps:
             scale_binding = plan["node_kv"][cp._key(scale_cache)]
             n = plan["n"]
             return native_indexer(
-                query[:n],
-                weights[:n],
-                query_scale[:n],
-                key_binding["original"],
-                scale_binding["original"],
-                key_binding["rows"],
-                scale_binding["rows"],
-                key_binding["table"],
-                plan,
-                self.index_topk,
+                query[:n], weights[:n], query_scale[:n],
+                key_binding["original"], scale_binding["original"],
+                key_binding["rows"], scale_binding["rows"], key_binding["table"],
+                plan, self.index_topk,
             )
         wait_for_device_metadata(DeviceMetadataStage.INDEXER, id(metadata.qli_metadata))
         topk_idxs, _ = torch.ops._C_ascend.npu_quant_lightning_indexer_v2(

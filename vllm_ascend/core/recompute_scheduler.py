@@ -1060,7 +1060,8 @@ class AsyncDyntraLBRecomputeScheduler(
     pass
 
 
-# Keep patch registration after the scheduler class definition.
-from vllm_ascend.patch.platform.patch_spec_decode_stats import _patch_tree_verify_width  # noqa: E402
+from vllm_ascend.patch.platform.patch_spec_decode_stats import (
+    _patch_tree_verify_width,
+)
 
 _patch_tree_verify_width(RecomputeScheduler)

@@ -1,28 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Device-only ancestor addressing for a flat tree node pool."""
-
 import torch
 from vllm.triton_utils import tl, triton
 
 
 @triton.jit
-def _ancestors_kernel(
-    Parents,
-    Depths,
-    Counts,
-    Req,
-    Qsl,
-    Ancestors,
-    Visible,
-    NodeDepth,
-    Hidden,
-    Parent,
-    PWIDTH: tl.constexpr,
-    MAX_DEPTH: tl.constexpr,
-    N: tl.constexpr,
-    BLOCK: tl.constexpr,
-):
+def _ancestors_kernel(Parents, Depths, Counts, Req, Qsl, Ancestors, Visible,
+                      NodeDepth, Hidden, Parent, PWIDTH: tl.constexpr,
+                      MAX_DEPTH: tl.constexpr, N: tl.constexpr,
+                      BLOCK: tl.constexpr):
     node = tl.program_id(0)
     req = tl.load(Req + node)
     root = tl.load(Qsl + req)
@@ -63,19 +50,8 @@ def build_ancestors(parents, depths, counts, req_ids, qsl, max_depth):
     hidden = torch.empty_like(node_depth)
     parent = torch.empty_like(node_depth)
     _ancestors_kernel[(n,)](
-        parents,
-        depths,
-        counts,
-        req_ids,
-        qsl,
-        ancestors,
-        visible,
-        node_depth,
-        hidden,
-        parent,
-        parents.shape[1],
-        max_depth,
-        n,
+        parents, depths, counts, req_ids, qsl, ancestors, visible, node_depth,
+        hidden, parent, parents.shape[1], max_depth, n,
         triton.next_power_of_2(max_depth + 1),
     )
     return ancestors, visible, node_depth, hidden, parent
