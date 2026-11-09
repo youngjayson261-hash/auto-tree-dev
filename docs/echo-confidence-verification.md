@@ -53,6 +53,40 @@ graph mode, random sampling, independent neural-kernel arithmetic or complete
 weight contents. Threshold 0.5 is a trial value, not a selected production
 threshold. Scorer P14/P15/P16 and both P17/P18 completion flags remain false.
 
+## Formal Scorer failure and diagnostic repair
+
+The separate Scorer formal run1 captured 12 modes and 83 generation cases.
+Its strict replay completed with exit 2 and seven issues. The six positive
+threshold groups each recorded Scheduler order 2 followed by Worker prepare
+order 1. An independently checked audit found two identical observer modules
+with separate order and completed-get registries. The final lifetime gate
+therefore rejected the evidence. This establishes a capture defect; it does
+not by itself establish a model arithmetic failure.
+
+The first CPU attempt timed out after 900 seconds. The single-thread replay
+then completed in 1,755 seconds without timeout. Both attempts are retained.
+Source, raw-data and oracle hashes remained unchanged. Scorer P14/P15/P16
+remain ungranted.
+
+A new diagnostic loader reuses the verified canonical module and checks both
+source copies, the loaded path and function bindings. Nine regression tests
+and 108 checks in the actual staged layout passed without skips; independent
+review found no open P0/P1/P2 within capture preparation. A separate run2 uses
+the same experiment and frozen oracle. Its formal acceptance remains pending.
+
+## Native model save validation
+
+The run3 schema diagnostic exited 0 in 367.3 seconds and recovered 4,037
+original files, totaling 499,245,393 bytes, with exact archive and member
+hash checks. The same profiler instance entered RECORD_AND_SAVE, advanced
+once to NONE and stopped. The previous Stop RECORD warning was absent;
+both SQLite databases returned `ok` from `PRAGMA quick_check`.
+
+These facts verify the single-save path, not complete native attribution or
+observer equivalence. A profiler no-warmup warning and optional-data export
+warnings are retained in the evidence index. No model D2H, synchronization,
+NPU-work equivalence or performance conclusion is granted by this diagnostic.
+
 ## Reproduction and original reports
 
 The experiment workspace is `results/echo-all-p-20261109` in the parent
@@ -64,6 +98,7 @@ never start another model:
 python -X utf8 -B run_p17_r5_base_off_comparison_v1.py status
 python -X utf8 -B run_p17_r5_base_on_comparison_v1.py status
 python -X utf8 -B run_scorer_raw_replay_v2.py status
+python -X utf8 -B run_scorer_formal_r5_run1_comparison_v3.py status
 ```
 
 Full reports are identified by workspace-relative paths, sizes and SHA-256
