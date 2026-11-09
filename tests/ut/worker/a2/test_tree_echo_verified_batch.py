@@ -71,3 +71,26 @@ def test_root_only_sampling_clears_previous_acceptance(monkeypatch):
     monkeypatch.setattr(GPUModelRunner, "sample", native_sample)
     monkeypatch.setattr("vllm_ascend.worker.v2.model_runner.lmhead_tp_enable", lambda: False)
     assert runner.sample(None, input_batch, None) == "sampled root"
+
+
+def test_reordered_round_uses_latest_budgets_and_preserves_snapshot():
+    runner = make_runner([3, 1])
+    first = runner._tree_verified_counts(
+        SimpleNamespace(scheduled_spec_decode_tokens={"a": [11], "b": [21, 22]}), batch(scheduled=(2, 3))
+    )
+    assert first == [1, 2]
+
+    runner.req_states.tree_next_budget_cpu[:] = [1, 0]
+    reordered = SimpleNamespace(
+        req_ids=["b", "a"],
+        idx_mapping_np=np.array([0, 1]),
+        is_prefilling_np=np.array([False, False]),
+        num_scheduled_tokens=np.array([2, 1]),
+    )
+    reordered.num_scheduled_tokens[0] = 3
+    with pytest.raises(ValueError, match="budget"):
+        runner._tree_verified_counts(SimpleNamespace(scheduled_spec_decode_tokens={"b": [31, 32]}), reordered)
+    reordered.num_scheduled_tokens[0] = 2
+    second = runner._tree_verified_counts(SimpleNamespace(scheduled_spec_decode_tokens={"b": [31]}), reordered)
+    assert second == [1, 0]
+    assert first == [1, 2]
