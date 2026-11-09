@@ -1060,7 +1060,8 @@ class AsyncDyntraLBRecomputeScheduler(
     pass
 
 
-from vllm_ascend.patch.platform.patch_spec_decode_stats import (
+# Preserve post-definition import: this helper patches Scheduler at import time.
+from vllm_ascend.patch.platform.patch_spec_decode_stats import (  # noqa: E402
     _patch_tree_verify_width,
 )
 

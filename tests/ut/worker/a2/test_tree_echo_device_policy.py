@@ -52,19 +52,19 @@ def make_case(rows, *, active_rows=None, capacity_rows=None, capacity=None, stri
     bootstrap = torch.zeros(cr, dtype=torch.bool, device="cpu")
     oracle_rows = []
     for i, x in enumerate(rows):
-        n, nd = len(x["depths"]), len(x["scores"])
+        n, num_depths = len(x["depths"]), len(x["scores"])
         depths[i, :n] = torch.tensor(x["depths"], dtype=torch.int64, device="cpu")
         parents[i, :n] = torch.tensor(x["parents"], dtype=torch.int64, device="cpu")
         counts[i] = n
-        maxima[i, :nd] = torch.tensor(x["scores"], dtype=torch.float32, device="cpu")
-        valid[i, :nd] = torch.tensor(x["valid"], dtype=torch.bool, device="cpu")
+        maxima[i, :num_depths] = torch.tensor(x["scores"], dtype=torch.float32, device="cpu")
+        valid[i, :num_depths] = torch.tensor(x["valid"], dtype=torch.bool, device="cpu")
         invalid[i], bootstrap[i] = x["invalid"], x["bootstrap"]
         oracle_rows.append(
             dict(
                 depths=x["depths"],
                 parents=x["parents"],
-                max_path_logp=[c_float(v).value for v in x["scores"]] + [-math.inf] * (d - nd),
-                valid_depths=x["valid"] + [False] * (d - nd),
+                max_path_logp=[c_float(v).value for v in x["scores"]] + [-math.inf] * (d - num_depths),
+                valid_depths=x["valid"] + [False] * (d - num_depths),
                 invalid_scores=x["invalid"],
                 bootstrap=x["bootstrap"],
             )

@@ -279,9 +279,7 @@ class DeepseekV4DSparkModel(nn.Module):
         """
         if slot_mapping is None or slot_mapping.numel() == 0 or cache_module is None:
             return False
-        prefix = str(
-            getattr(cache_module, "prefix", "") or getattr(cache_module, "layer_name", "") or ""
-        )
+        prefix = str(getattr(cache_module, "prefix", "") or getattr(cache_module, "layer_name", "") or "")
         cls_name = type(cache_module).__name__
         if "state_cache" in prefix or cls_name.endswith("StateCache"):
             return False
@@ -378,10 +376,7 @@ class DeepseekV4DSparkModel(nn.Module):
             slots_by_name = override
         else:
             slots_by_name = {
-                name: slots
-                for name, slots in zip(
-                    self.get_draft_kv_cache_layer_names(), context_slot_mapping
-                )
+                name: slots for name, slots in zip(self.get_draft_kv_cache_layer_names(), context_slot_mapping)
             }
         written_ptrs: set[int] = set()
         for layer in self.layers.values():
@@ -396,9 +391,7 @@ class DeepseekV4DSparkModel(nn.Module):
                     break
             skip_dup = ptr != -1 and ptr in written_ptrs
             if slots is not None and not skip_dup:
-                shared_kv = self._project_shared_kv(
-                    attn.wkv(context_states), context_positions, attn
-                )
+                shared_kv = self._project_shared_kv(attn.wkv(context_states), context_positions, attn)
                 wrote = self._store_standard_swa_kv(shared_kv, slots, attn)
                 if wrote and ptr != -1:
                     written_ptrs.add(ptr)

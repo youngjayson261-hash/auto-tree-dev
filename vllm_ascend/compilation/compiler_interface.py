@@ -78,9 +78,7 @@ def _compute_decode_cudagraph_batch_sizes(vllm_config: VllmConfig) -> list[int]:
             from vllm_ascend.worker.v2.spec_decode import tree_target_query_len
 
             qlen = tree_target_query_len(vllm_config)
-            uniform_decode_query_len = (
-                qlen if qlen is not None else 1 + speculative_config.num_speculative_tokens
-            )
+            uniform_decode_query_len = qlen if qlen is not None else 1 + speculative_config.num_speculative_tokens
         else:
             uniform_decode_query_len = 1 + speculative_config.num_speculative_tokens
     else:
