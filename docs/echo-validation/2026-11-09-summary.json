@@ -1,6 +1,6 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T13:52:05.437449+00:00",
+  "recorded_utc": "2026-11-09T15:06:43.534842+00:00",
   "scope": "Archive index and actual results only; original raw archives are stored outside this Git repository.",
   "production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
   "production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
@@ -140,10 +140,132 @@
   },
   "pending": [
     "Scorer full correctness/lifecycle/stop acceptance independent of Base.",
-    "Matched Base on12 correctness plus paired logical metric evidence.",
     "Source-bound native operation/synchronization/copy equivalence for actual model traces.",
     "P18 matched workload performance and final delivery evidence."
   ],
   "CI_policy": "Unrelated inherited CI cleanup must not be mixed back into ECHO.",
-  "full_repository_CI_passed": false
+  "full_repository_CI_passed": false,
+  "base_r5_on": {
+    "attempt": "p17-on-r5-v2",
+    "scope": "Same-source Base full-vocabulary on12 only",
+    "modes": 12,
+    "cases": 83,
+    "passed": true,
+    "P14": true,
+    "P15": true,
+    "P16": true,
+    "issues": [],
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/p17-r5-on-comparison-v1/comparison-v3.json",
+      "bytes": 212825,
+      "sha256": "c42ffedafdeb2eb6267fcb8b937e50d372b2ad0391922d1c0a0af0474436381e"
+    },
+    "CPU_replay_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/p17-r5-on-comparison-v1/status.json",
+      "bytes": 1431,
+      "sha256": "e356edc6119be61b373bcd313cf61cb1cc5a22cc8f5ad21a8f13022ae5df059d"
+    },
+    "raw_archive_sha256": "c10ad366cc12defdcb2480dfeb5dcfc7348b6582d70149d4d8589aefbd8989ac",
+    "verified_raw_files": 3398,
+    "source_changed": [],
+    "raw_changed": [],
+    "proof_changed": [],
+    "grants_Scorer": false,
+    "grants_P17": false,
+    "grants_P18": false
+  },
+  "base_logical_pair": {
+    "scope": "Logical metrics and paired native semantics only",
+    "passed": true,
+    "logical_metrics_passed": true,
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-pair-analysis-v1/matched-result-v1.json",
+      "bytes": 17462,
+      "sha256": "5b50a99a447ebba9a6077041795490c3be04eef42a18dce5480f0ab8b08a0fe8"
+    },
+    "comparator": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-pair-analysis-v1/compare_pair.py",
+      "bytes": 14988,
+      "sha256": "37af291f1f02a7111ca1c7bd53060c4ae7ce161d076db7468facea8022d071dd"
+    },
+    "cases_per_run": 83,
+    "modes": 12,
+    "P17_complete": false,
+    "P18_ready": false,
+    "requires_native_model_equivalence": true,
+    "independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/paired-and-tiny-independent-review-v1.json",
+      "bytes": 1291,
+      "sha256": "0f6db0c7305f7719f8016c776ea8273720d39129c6fe932d0eb4348c594c8f30"
+    }
+  },
+  "native_tiny_copy_controls_v5": {
+    "scope": "tiny_copy_channel_controls_only",
+    "passed": true,
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-native-direct-controls-v5/actual-replay-v1.json",
+      "bytes": 3918,
+      "sha256": "01033125e15232f538bca4ef6059cb72139c3baf0b3b8fc6ccf38fe7b41be523"
+    },
+    "CPU_replay_tests": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-native-direct-controls-v5/replay-checks-v1/result.json",
+      "bytes": 135,
+      "sha256": "361ab9e62dc1ce7e6e7a56728931c15dd5cfd4db22700bfaa7ee091aeefd2deb"
+    },
+    "blocking_d2h": {
+      "count": 1,
+      "bytes": 16384
+    },
+    "async_d2h": {
+      "count": 1,
+      "bytes": 16384
+    },
+    "zero_copy": {
+      "count": 0,
+      "bytes": 0
+    },
+    "raw_archive_sha256": "279d52a171cfe730ace1cc48d857b5d6cd0053c3123519c9e050df63c419abd8",
+    "verified_raw_files": 127,
+    "full_model_zero_supported": false,
+    "P17_complete": false,
+    "P18_ready": false,
+    "independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/paired-and-tiny-independent-review-v1.json",
+      "bytes": 1291,
+      "sha256": "0f6db0c7305f7719f8016c776ea8273720d39129c6fe932d0eb4348c594c8f30"
+    }
+  },
+  "scorer_formal_harness": {
+    "scope": "Prospective formal harness and independent CPU fixtures only",
+    "CPU_tests": 257,
+    "CPU_skipped": 0,
+    "CPU_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-formal-full-cpu-v2/status.json",
+      "bytes": 1023,
+      "sha256": "5aef28351f955110460747f0b9e4ef6d97ad53bfb1660d0c28a51846acad35ec"
+    },
+    "actual_staged_CPU_tests": 99,
+    "actual_staged_CPU_skipped": 0,
+    "staged_CPU_receipt": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v1/root-cpu-01.json",
+      "bytes": 18618,
+      "sha256": "9fadf7800f5d0a7ec004bb2a5b4eb38653faf69f7ca38d94eb517d083d97603e"
+    },
+    "independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v1/independent-review.json",
+      "bytes": 1434,
+      "sha256": "a82956f19c33baab2a50dc7356c5de8d7b3810d23e1564c18e54d4cee386d56b"
+    },
+    "oracle_freeze": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-oracle-v1/freeze.json",
+      "bytes": 30306,
+      "sha256": "8848fc26566eb8e59b9de51b0e070984a1873e6e781354946d049e96119f45e7"
+    },
+    "formal_model_acceptance_pending": true,
+    "P14": false,
+    "P15": false,
+    "P16": false,
+    "P17": false,
+    "P18": false
+  }
 }
