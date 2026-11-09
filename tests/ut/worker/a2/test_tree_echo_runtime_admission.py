@@ -10,7 +10,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.sampling_params import SamplingParams, StructuredOutputsParams
 from vllm.v1.worker.gpu.sample.sampler import BadWordsState, LogitBiasState, PenaltiesState
 
-from vllm_ascend.ascend_config import TreeSpecConfig
+from vllm_ascend.ascend_config import FinegrainedTPConfig, TreeSpecConfig
 from vllm_ascend.models.qwen3_domino import AscendDominoQwen3ForCausalLM
 from vllm_ascend.worker.v2.model_runner import NPUModelRunner
 from vllm_ascend.worker.v2.spec_decode.tree.builder import TreeBuilder
@@ -52,6 +52,7 @@ def make_runner(config):
     speculator.enable_adaptive_verification = False
     runner = NPUModelRunner.__new__(NPUModelRunner)
     runner.vllm_config = config
+    runner.ascend_config = SimpleNamespace(finegrained_tp_config=FinegrainedTPConfig())
     runner._tree_budget_enabled = True
     runner.speculator = speculator
     runner.model_state = SimpleNamespace(num_new_sampled_tokens_per_step=1)
@@ -165,11 +166,38 @@ def test_bool_threshold_rejected(value):
         TreeSpecConfig(verification_threshold=value)
 
 
-@pytest.mark.parametrize("field", ["tensor_parallel_size", "pipeline_parallel_size"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "tensor_parallel_size",
+        "pipeline_parallel_size",
+        "data_parallel_size",
+        "prefill_context_parallel_size",
+        "decode_context_parallel_size",
+    ],
+)
 def test_real_parallel_gate(runtime_config, monkeypatch, field):
     monkeypatch.setattr(runtime_config.parallel_config, field, 2)
     with pytest.raises(ValueError, match="confidence"):
         make_runner(runtime_config)._validate_tree_confidence_runtime()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "oproj_tensor_parallel_size",
+        "lmhead_tensor_parallel_size",
+        "embedding_tensor_parallel_size",
+        "mlp_tensor_parallel_size",
+    ],
+)
+def test_real_finegrained_gate(runtime_config, monkeypatch, field):
+    runner = make_runner(runtime_config)
+    # Mutate an otherwise legal loaded configuration: constructor rejection
+    # alone would not exercise the positive-confidence runner guard.
+    monkeypatch.setattr(runner.ascend_config.finegrained_tp_config, field, 2)
+    with pytest.raises(ValueError, match="finegrained_tp"):
+        runner._validate_tree_confidence_runtime()
 
 
 def test_request_rejected_before_native_add(runtime_config, monkeypatch):

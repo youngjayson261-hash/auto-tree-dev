@@ -71,11 +71,25 @@ class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
             ),
             vllm_config=SimpleNamespace(
                 scheduler_config=SimpleNamespace(async_scheduling=False),
-                parallel_config=SimpleNamespace(tensor_parallel_size=1, pipeline_parallel_size=1),
+                parallel_config=SimpleNamespace(
+                    tensor_parallel_size=1,
+                    pipeline_parallel_size=1,
+                    data_parallel_size=1,
+                    prefill_context_parallel_size=1,
+                    decode_context_parallel_size=1,
+                ),
                 max_concurrent_batches=1,
                 model_config=SimpleNamespace(enforce_eager=True),
             ),
             model_state=SimpleNamespace(num_new_sampled_tokens_per_step=1),
+            ascend_config=SimpleNamespace(
+                finegrained_tp_config=SimpleNamespace(
+                    oproj_tensor_parallel_size=0,
+                    lmhead_tensor_parallel_size=0,
+                    embedding_tensor_parallel_size=0,
+                    mlp_tensor_parallel_size=0,
+                )
+            ),
             adaptive_verification=None,
         )
         bindings = {
