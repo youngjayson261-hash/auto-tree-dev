@@ -164,6 +164,10 @@ def validate_runtime_facts(
     async_scheduling,
     tp,
     pp,
+    dp,
+    pcp,
+    dcp,
+    finegrained_tp_sizes,
     max_concurrent_batches,
     bonus_count,
     enforce_eager,
@@ -178,6 +182,14 @@ def validate_runtime_facts(
     checks = (
         (not async_scheduling, "async_scheduling"),
         (tp == 1 and pp == 1, "parallelism"),
+        (type(dp) is int and dp == 1, "data_parallelism"),
+        (all(type(size) is int and size == 1 for size in (pcp, dcp)), "context_parallelism"),
+        (
+            isinstance(finegrained_tp_sizes, tuple)
+            and len(finegrained_tp_sizes) == 4
+            and all(type(size) is int and size in (0, 1) for size in finegrained_tp_sizes),
+            "finegrained_tp",
+        ),
         (max_concurrent_batches == 1, "concurrent_batches"),
         (bonus_count == 1, "single_root"),
         (enforce_eager and not tree_graph_present, "eager"),

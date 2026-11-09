@@ -421,10 +421,23 @@ class NPUModelRunner(GPUModelRunner):
             )
         )
         cfg = self.vllm_config
+        finegrained_tp = getattr(getattr(self, "ascend_config", None), "finegrained_tp_config", None)
         validate_runtime_facts(
             async_scheduling=cfg.scheduler_config.async_scheduling,
             tp=cfg.parallel_config.tensor_parallel_size,
             pp=cfg.parallel_config.pipeline_parallel_size,
+            dp=getattr(cfg.parallel_config, "data_parallel_size", None),
+            pcp=getattr(cfg.parallel_config, "prefill_context_parallel_size", None),
+            dcp=getattr(cfg.parallel_config, "decode_context_parallel_size", None),
+            finegrained_tp_sizes=tuple(
+                getattr(finegrained_tp, name, None)
+                for name in (
+                    "oproj_tensor_parallel_size",
+                    "lmhead_tensor_parallel_size",
+                    "embedding_tensor_parallel_size",
+                    "mlp_tensor_parallel_size",
+                )
+            ),
             max_concurrent_batches=cfg.max_concurrent_batches,
             bonus_count=self.model_state.num_new_sampled_tokens_per_step,
             enforce_eager=cfg.model_config.enforce_eager,
