@@ -16,6 +16,7 @@ from vllm_ascend.utils import vllm_version_is
 from vllm_ascend.worker.v2.spec_decode.dflash.speculator import (
     AscendDFlashSpeculator,
 )
+from vllm_ascend.worker.v2.spec_decode.tree.budget_metrics import TreeBudgetStats
 from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import (
     PolicyStatus,
     TreeScoreSummary,
@@ -186,6 +187,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         self._dsv4_dspark_draft = dsv4_dspark_draft(vllm_config)
         self.tree_shape = TreeShape(self.num_speculative_steps, self.budget, self.topk, self._dsv4_dspark_draft)
         self.tree_graph_stats = TreeGraphStats()
+        self.tree_budget_stats = TreeBudgetStats()
         if self._dsv4_dspark_draft and self.topk > 1:
             if not vllm_config.model_config.enforce_eager:
                 if vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.FULL:
@@ -735,6 +737,8 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 if self._tree_budget_runtime is not None:
                     self._tree_budget_runtime.update_batch(input_batch.is_prefilling_np, input_batch.num_reqs)
                 self._finalize_tree(input_batch.num_reqs)
+                if self.tree_builder is not None and self.tree_budget_stats.enabled:
+                    self.tree_budget_stats.record_builder_produced(self.tree_builder, input_batch.num_reqs)
                 if self._tree_budget_enabled:
                     self._publish_tree_budget()
                 if self._dsv4_dspark_draft and self.topk == 1:

@@ -40,12 +40,14 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         *,
         verification_policy: str = "fixed",
         threshold: float = 0.0,
+        budget_stats=None,
     ) -> None:
         validate_policy_config(verification_policy, threshold)
         super().__init__(device)
         self.req_states = req_states
         self.speculator = speculator
         self._budget_enabled = verification_policy == "confidence" and threshold > 0
+        self._budget_stats = budget_stats
         self._pending_budget: _PendingBudget | None = None
         self._budget_sealed = False
         if self._budget_enabled:
@@ -84,7 +86,10 @@ class TreeDraftTokensHandler(DraftTokensHandler):
 
     def get_draft_tokens(self) -> DraftTokenIds | None:
         if not self._budget_enabled:
-            return super().get_draft_tokens()
+            result = super().get_draft_tokens()
+            if self._budget_stats is not None and self._budget_stats.enabled and result is not None:
+                self._budget_stats.record_fixed_delivery(self.speculator.tree_builder, result, int(PolicyStatus.FIXED))
+            return result
         pending = self._pending_budget
         if pending is None:
             return None
@@ -112,6 +117,8 @@ class TreeDraftTokensHandler(DraftTokensHandler):
                 accepted.append((req_id, slot, budget))
             for _, slot, budget in accepted:
                 self.req_states.tree_next_budget_cpu[slot] = budget
+            if self._budget_stats is not None and self._budget_stats.enabled:
+                self._budget_stats.record_budget_delivery(self.speculator.tree_builder, pending.req_ids, rows, accepted)
             return DraftTokenIds([req_id for req_id, _, _ in accepted], [[-1] * budget for _, _, budget in accepted])
         finally:
             self._pending_budget = None

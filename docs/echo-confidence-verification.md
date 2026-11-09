@@ -14,7 +14,7 @@ single-card, greedy protocol.
 | Base a5 on production code `a0f8a105` | P14/P15/P16 passed; issues empty | Base full-vocabulary correctness only |
 | Base r5 off12 candidate | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Same-source candidate with observation disabled |
 | Base r5 on12 candidate | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Same-source candidate with observation enabled |
-| Base r5 paired replay | Logical counters and paired semantics passed | Native model profiling remains required |
+| Base r5 paired replay | Logical counters and paired semantics passed | Finite native five-arm evidence below; overall P17 pending |
 | Scorer calibration r5 run2 | Strict probability calibration passed; issues empty | Calibration only |
 | Scorer formal r5 run2 | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Independent Scorer-only correctness and lifecycle suite |
 
@@ -25,8 +25,9 @@ No Base result grants correctness to the Scorer confidence source.
 
 The isolated r5 candidate has 4,728 source files and manifest
 `69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b`.
-It contains pending P17 work and is distinct from production commit `a0f8a105`.
-This documentation change does not apply that runtime candidate.
+This change delivers its exact nine reviewed runtime/test files on top of the
+previous production code `a0f8a105`. The evidence index binds every delivered
+file to the tested snapshot. This delivery does not grant overall P17 or P18.
 
 ## What the Scorer calibration establishes
 
@@ -127,37 +128,55 @@ the corresponding new model results. A successful model process alone was
 not used as an acceptance result. Download failures and original partial
 files were preserved; recovered archives passed exact SHA and member checks.
 
+## Host budget accounting delivered
+
+The new internal DEBUG-gated statistics distinguish produced S, published A,
+verified V and raw sampler acceptance. Consumption captures the current request
+cohort before the next proposal can replace it. Unconsumed work, unmatched
+prefill outputs and discarded publications remain separate. These accepted-token
+counts exclude the root/bonus and precede Scheduler/frontend terminal clipping;
+they are not counts of tokens delivered through the API.
+
+Statistics use existing host scalars and already delivered host token IDs. The
+async output wrapper delegates the original get_output once per call; it adds no
+device value read, synchronization or copy for metrics. Diagnostic errors mark
+counts unknown and cannot replace native inference results or exceptions. No
+public parameter, metrics endpoint or default policy is added.
+
+The exact source passed 225 CPU tests with nine NPU-only skips. Its separate
+component checks passed 54 CPU and 58 native checks without skips. Delivery
+review independently passed another 37 tests and found no open P0/P1/P2.
+
 ## Remaining P17 and P18 gates
 
-The Base off12 and on12 counterparts passed the same correctness comparator.
-The paired replay reports matching outputs, native state semantics and counters
-across all 83 cases. Native profiling must still establish operation,
-synchronization and D2H equivalence on actual model traces.
+Base off12/on12 passed the same correctness comparator across 83 cases. The
+five canonical34/128 native off/on pairs are now collected and replayed. Recorded
+compute, copy parameters, synchronization calls and per-stream work agree after
+classifying only the fixed zero-duration StreamSyncTaskFinish diagnostic point.
+Ten canonical outputs match completely. The shortening arm has three consumed
+shrinks and matched S/A/V/accepted totals of 432/408/408/123; the other four arms
+have 432/432/432/123.
 
-The v5 tiny calibration identified one 16,384-byte synchronous D2H copy and
-one 16,384-byte direct asynchronous D2H copy. Its source-bound zero-copy marker
-had zero copies; 26 CPU checks passed without skips. This calibrated marker
-does not establish zero-copy behavior for arbitrary model traces or complete P17.
+The original default strict comparison remains failed at 24 versus 23 diagnostic
+completion points; strict equality also fails for explicit-fixed and tau0.
+Every such point retains its unique synchronization parent. Fixed official
+runtime sources and the separate reviewed classifier support the limited
+diagnostic classification; the exact internal skipped branch was not observed.
+Original failures are not rewritten. Neither global trace completeness nor
+universal buffer ownership is claimed. This reviewed finite Base evidence still
+requires the exact P18 provider and plan to be reviewed before P18 admission.
 
-Scorer now has its own successful correctness and lifecycle matrix, as
-recorded above. Complete logits were required for every publication, with up to
-two request rows, 512 publications and 16 GiB of full logits per group. Exceeding
-a limit fails capture; it never truncates evidence to claim success.
+Scorer has its own formal correctness/lifecycle pass. Its five-arm native
+off/on sequence is running separately with thresholds 0.50/0.05; Base native
+results do not grant Scorer P17. The earlier tiny copy calibration remains a
+calibration only, not a model-wide zero-copy proof.
 
-The real Base default-fixed native off/on pair completed and was recovered,
-but its original strict native comparison failed: zero-duration
-StreamSyncTaskFinish records numbered 24 versus 23. Compute tasks, raw copies
-and the other recorded synchronization call counts matched. Every completion
-point has a synchronization parent; the difference is within the final
-DeviceSynchronize call. Source attribution is still pending. This failure is
-retained and does not grant P17. The remaining Base arms must use the actual
-Base thresholds above; the older unrun packages with Scorer thresholds were
-blocked and replaced before any of those remaining Base pair packages
-was staged or launched.
-
-P18 has not run. Any performance conclusion requires the fixed matched
-workload, cache initial state, warmup, repeated measurements and original
-logs after correctness and P17 admission. There is no measured speedup claim.
+P18 has no measured performance result. Preparation includes a reviewed
+component reader and CPU fingerprints for 6,439 selected model/runtime files.
+The complete owned-task wiring is still under preparation. Actual component
+diagnostics must pass before formal timing can be admitted. Formal comparison
+requires the fixed input, matching outputs, fresh cache state, public warmup,
+five repetitions per arm and original logs. There is no speedup claim.
 
 ## CI and change boundaries
 

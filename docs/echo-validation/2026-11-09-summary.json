@@ -1,9 +1,7 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T18:32:59.154411+00:00",
-  "scope": "Archive index and actual results only; original raw archives are stored outside this Git repository.",
-  "production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
-  "production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
+  "recorded_utc": "2026-11-09T20:15:27.835433+00:00",
+  "scope": "Actual evidence index plus exact tested runtime-file delivery binding; raw archives remain outside Git.",
   "base_a5": {
     "scope": "Base full vocabulary, eager, pinned a0 source only",
     "passed": true,
@@ -32,7 +30,7 @@
     "source_files": 4728,
     "source_manifest_sha256": "69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b",
     "isolated_runtime_candidate": true,
-    "production_runtime_change_in_this_documentation_commit": false
+    "exact_nine_runtime_files_included_in_this_commit": true
   },
   "base_r5_off": {
     "attempt": "p17-off-r5-v3",
@@ -139,8 +137,9 @@
     "exact_original_archive_recovered": true
   },
   "pending": [
-    "Source-bound native operation/synchronization/copy equivalence for actual model traces.",
-    "P18 matched workload performance and final delivery evidence."
+    "Scorer source-specific five-arm native operation/synchronization/copy equivalence.",
+    "Independent exact P18 provider, plan, assets and owned per-task transport admission.",
+    "Separate P18 component diagnostics, then repeated matched formal timing and final evidence."
   ],
   "CI_policy": "Unrelated inherited CI cleanup must not be mixed back into ECHO.",
   "full_repository_CI_passed": false,
@@ -514,7 +513,7 @@
     "StreamSyncTaskFinish_off": 24,
     "StreamSyncTaskFinish_on": 23,
     "raw_copy_compute_other_sync_counts_equal": true,
-    "source_attribution_pending": true,
+    "source_attribution_pending": false,
     "comparison": {
       "workspace_relative_path": "results/echo-all-p-20261109/p17-native-model-pairs-v1/default-pair-comparison-v1.json",
       "bytes": 882617,
@@ -531,9 +530,170 @@
       "sha256": "ace52cfa648790155f4ca9664bce2ced8049e90798ccefed4afe3fa5ddc5407d"
     },
     "remaining": [
-      "source-bound conditional completion-point semantics",
-      "complete P17 equivalence admission",
-      "P18 performance"
+      "Scorer source-specific native equivalence",
+      "exact P18 provider/plan admission",
+      "P18 diagnostic and formal performance suites"
     ]
+  },
+  "prior_production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
+  "prior_production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
+  "runtime_delivery": {
+    "included_in_this_commit": true,
+    "base_commit": "38c5bfdc47adf5d4fbd0d30b33814da8a3e5597c",
+    "tested_snapshot": "bcfb69c2cfaf9eab6a45226b674e3e9669edee5b",
+    "tested_source_manifest_sha256": "69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b",
+    "files": [
+      {
+        "path": "vllm_ascend/worker/v2/model_runner.py",
+        "bytes": 90403,
+        "sha256": "5025edc20be863280cd7dbc3a4341ca6f4c8d0483ca2395a5b68728df627a964"
+      },
+      {
+        "path": "vllm_ascend/worker/v2/spec_decode/tree/budget_metrics.py",
+        "bytes": 10324,
+        "sha256": "8085c4b996aa1cebfdf2f443d764a8bb05a71698a0a549de6a551659e96bfd04"
+      },
+      {
+        "path": "vllm_ascend/worker/v2/spec_decode/tree/budget_output.py",
+        "bytes": 771,
+        "sha256": "16c9232e3bcfed30f93dee941e90bffc3fdd1f6043f034a69706a1e2df445f8a"
+      },
+      {
+        "path": "vllm_ascend/worker/v2/spec_decode/tree/budget_policy.py",
+        "bytes": 15942,
+        "sha256": "8506cbadfe27266d00797ad4a002ba5aba6b1b70217095c40d526b0bdef12161"
+      },
+      {
+        "path": "vllm_ascend/worker/v2/spec_decode/tree/draft_tokens.py",
+        "bytes": 6075,
+        "sha256": "080eab2ae95a9b1d06e2a67325d6596da9bc6bee2d63e64ac0500361f4f3aaa6"
+      },
+      {
+        "path": "vllm_ascend/worker/v2/spec_decode/tree/speculator.py",
+        "bytes": 47472,
+        "sha256": "551f37cf222b418ed4b4472f0cf5cf57231fca0c78f205d2f4c5566bb3ee51b1"
+      },
+      {
+        "path": "tests/ut/spec_decode/test_tree_budget_counts.py",
+        "bytes": 2680,
+        "sha256": "8bd3b5396c475e21035732ee95607f80258b1e8166d12ade5ee2c0e1e79fa5c1"
+      },
+      {
+        "path": "tests/ut/spec_decode/test_tree_budget_metrics.py",
+        "bytes": 27968,
+        "sha256": "942061a73667a88489037ee51a3fafdbbcaf8c52d8b6105d6bf79063937336ff"
+      },
+      {
+        "path": "tests/ut/worker/a2/test_tree_echo_scheduler_preemption.py",
+        "bytes": 13877,
+        "sha256": "0307f02839e03f3365437aa7b77ea5873c7ce34997a2c7dbf4b7de3a92fefb04"
+      }
+    ],
+    "source_manifest": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/coherent-p17-r5-v1/source-manifest.json",
+      "bytes": 872498,
+      "sha256": "69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b"
+    },
+    "independent_delivery_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-feature-delivery-v1/independent-nine-file-review-v1.json",
+      "bytes": 4427,
+      "sha256": "601d4aed0145595e4ca02c06d4ba68dd720cc355c5ed67de729453d101eae1cc"
+    },
+    "original_CPU_and_CI_source_binding": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-ci-feature-only-r5-v1/actual-r5-ci-review-v1/scope-and-transfer-review.json",
+      "bytes": 2959,
+      "sha256": "39031b6f3960d4c084c411b24152aabac9ace58e597c501896ed2c4e72bc1321"
+    },
+    "CPU_passed": 225,
+    "CPU_NPU_skipped": 9,
+    "component_CPU_passed": 54,
+    "component_native_passed": 58,
+    "new_CI_failure_signatures": [],
+    "full_CI_passed": false,
+    "unrelated_CI_cleanup_included": false,
+    "public_API_or_configuration_added": false,
+    "P17_overall": false,
+    "P18": false
+  },
+  "Base_five_arm_finite_native_evidence": {
+    "scope": "finite exact-protocol off/on operation equivalence and host-ledger arithmetic only; no performance or universal trace claim",
+    "score_source": "base_full_vocab",
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-source-native-aggregate-v1/base-result-v4.json",
+      "bytes": 28877,
+      "sha256": "ba2d8e700ef6bcf04924773bc5eeba512a8384f21c0b57872c59371519f23939"
+    },
+    "independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-source-native-aggregate-v1/base-independent-review-v1.json",
+      "bytes": 1418,
+      "sha256": "7c0c581fc71236d2b3ed46f87e75ec727ea9878dd50a8eec324d65d50ef1d4f8"
+    },
+    "source_conditional_provider": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-conditional-point-provider-v1/conditional_points.py",
+      "bytes": 5951,
+      "sha256": "922608d4df003388bb3b9f77308ec4e71b655b466a86fa58dd40f6462e6f677b"
+    },
+    "source_conditional_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-conditional-point-provider-v1/independent-review.json",
+      "bytes": 1531,
+      "sha256": "f42b30533204b2cabd3eaf8953804aba8347db7281bc8962dd4eede139c1aa77"
+    },
+    "pairs": 5,
+    "captures": 10,
+    "production_files": 811,
+    "finite_checks_passed": true,
+    "strict_all_records_equal": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ],
+    "retained_conditional_completion_point_differences": true,
+    "shortening_matched_S_A_V_accepted": [
+      432,
+      408,
+      408,
+      123
+    ],
+    "actual_consumed_shrink_rounds": 3,
+    "canonical_outputs_all_equal": true,
+    "global_trace_completeness_verified": false,
+    "global_buffer_ownership_verified": false,
+    "P17_overall": false,
+    "P18": false,
+    "finite_P18_provider_and_plan_review_required": true
+  },
+  "Scorer_native_collection": {
+    "source": "scorer_logprob",
+    "snapshot": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-feature-delivery-v1/scorer-native-delivery-snapshot-v1.json",
+      "bytes": 1186,
+      "sha256": "2591e6f41ce9914e88980079232f15cf32442f6f5bda341022e483374e2bd43b"
+    },
+    "scope": "collection in progress at documentation snapshot; no final native verdict",
+    "P17": false,
+    "P18": false
+  },
+  "P18_preparation": {
+    "component_reader_freeze": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-native-component-provider-v3/source-freeze-v3.json",
+      "bytes": 1309,
+      "sha256": "8714b0d2142cdbe24f27b69d36c1af3b08ab5ff2dcd3e15dae0d0200aa2c8d50"
+    },
+    "component_reader_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-native-component-provider-v3/independent-review-v3.json",
+      "bytes": 585,
+      "sha256": "d86e5006d60fad388971befe9103c380b7d67eb5b1c152a8b6876afefa245d03"
+    },
+    "assets_runtime_inventory": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-assets-runtime-bindings-v1/bindings.json",
+      "bytes": 4618747,
+      "sha256": "a67d108ce5cd33fc19acaa13a17a56537a8d4f064cbd654063541f869cb96c7a"
+    },
+    "selected_files": 6439,
+    "actual_performance_samples": 0,
+    "launch_allowed": false,
+    "P18": false
   }
 }
