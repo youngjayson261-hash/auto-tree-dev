@@ -1,0 +1,149 @@
+{
+  "schema": "echo-validation-evidence-index-v1",
+  "recorded_utc": "2026-11-09T13:52:05.437449+00:00",
+  "scope": "Archive index and actual results only; original raw archives are stored outside this Git repository.",
+  "production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
+  "production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
+  "base_a5": {
+    "scope": "Base full vocabulary, eager, pinned a0 source only",
+    "passed": true,
+    "P14": true,
+    "P15": true,
+    "P16": true,
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/acceptance-a5-v3-20261109/comparison-v3.json",
+      "bytes": 212413,
+      "sha256": "1ba70fe8dfbb976c527b6db43e3a2bfcbfc1c178a9adddd60b625fd29a413abb"
+    },
+    "raw_archive_sha256": "c90be2524da86fa367e4a8313561f79c932e6c290fc09149ce1a90559fe2faa9",
+    "verified_raw_files": 3212,
+    "verified_raw_bytes": 1543066325,
+    "issues": [],
+    "source_changed": [],
+    "raw_changed": [],
+    "proof_changed": [],
+    "grants_Scorer": false,
+    "grants_P17": false,
+    "grants_P18": false
+  },
+  "candidate_r5": {
+    "source_snapshot": "bcfb69c2cfaf9eab6a45226b674e3e9669edee5b",
+    "source_tree": "cdc4e1e437f702417b03f2c5b8cc55d909e9fead",
+    "source_files": 4728,
+    "source_manifest_sha256": "69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b",
+    "isolated_runtime_candidate": true,
+    "production_runtime_change_in_this_documentation_commit": false
+  },
+  "base_r5_off": {
+    "attempt": "p17-off-r5-v3",
+    "scope": "Same-source Base full-vocabulary off12 only",
+    "modes": 12,
+    "cases": 83,
+    "passed": true,
+    "P14": true,
+    "P15": true,
+    "P16": true,
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/p17-r5-off-comparison-v1/comparison-v3.json",
+      "bytes": 212825,
+      "sha256": "3cbd2d2d87879e94c3bf2fb5a1857e761a293ffacf5a77a0cce1bdbe85e6f099"
+    },
+    "CPU_replay_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/p17-r5-off-comparison-v1/status.json",
+      "bytes": 1436,
+      "sha256": "6ecab0a6f06ee511971c4ee48beb244b86d38bfcb31d556067edb0f29687f8df"
+    },
+    "raw_archive_sha256": "31a5bc5e54a0af999a2e8ae09fa91cf55773966eef75b9040a5c08f3d70814f4",
+    "verified_raw_files": 3398,
+    "issues": [],
+    "source_changed": [],
+    "raw_changed": [],
+    "proof_changed": [],
+    "grants_Scorer": false,
+    "grants_P17": false,
+    "grants_P18": false
+  },
+  "scorer_run2": {
+    "attempt": "scorer-calibration-r5-run2",
+    "scope": "Scorer probability calibration only",
+    "passed": true,
+    "issues": [],
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-raw-replay-r5-run2-v1-recovered/20261109T134913242715Z/comparison.json",
+      "bytes": 1294,
+      "sha256": "89aa917cf51bae4a6bafafca9a20f98153f02a5553026380af9d56a1b46f1789"
+    },
+    "CPU_replay_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-raw-replay-r5-run2-v1-recovered/20261109T134913242715Z/status.json",
+      "bytes": 2539,
+      "sha256": "483295965e891b6fa54bfc77e3b051c705e7738608433992e15ccb81298e7849"
+    },
+    "source_changed": [],
+    "raw_changed": [],
+    "loaded_contract": {
+      "schema": "echo-scorer-loaded-before-input-v1",
+      "exact_type": "vllm_ascend.worker.v2.spec_decode.tree.scoring.DominoScorer",
+      "prefix_len": 1,
+      "candidate_size_configured": 64,
+      "candidate_size_effective": 64,
+      "full_vocab_size": 151936,
+      "correction_dtype": "torch.bfloat16",
+      "keep_origin_chain": false,
+      "before_first_input": true,
+      "provenance": "native runner.speculator.tree_builder.scorer host descriptors"
+    },
+    "evidence": {
+      "consumed_publications": 3,
+      "closed_positive_v_rounds": 3,
+      "consecutive_rounds": true,
+      "naturally_shortened_consumers": 2,
+      "full_vocab_proofs": 4,
+      "full_vocab_bytes": 19447808,
+      "native_publications": 4,
+      "prefix_full_vocab_proofs": 4,
+      "suffix_all_c_proofs": 60,
+      "handler_transport": {
+        "event_counts": {
+          "worker_state_remove": 1,
+          "worker_state_add": 1,
+          "handler_set": 4,
+          "handler_seal": 4,
+          "handler_get": 4
+        },
+        "delivered_publications": 4,
+        "handler_source_hashes": [
+          "080eab2ae95a9b1d06e2a67325d6596da9bc6bee2d63e64ac0500361f4f3aaa6"
+        ],
+        "inflight_lifetime_claim": false
+      },
+      "trial_threshold": 0.5,
+      "threshold_selected_for_formal": false
+    },
+    "pre_run_oracle_freeze_sha256": "8c83af934ba7a5369e17f63717ea1a7fed564f0d761fd1528c6e7e333bef2709",
+    "plan_sha256": "d9e67c740de4390d291dda1e67555fcb1a2bd94e0c9019cbcc1f290d159744c0",
+    "raw_archive_sha256": "8f60f0f9667c36c4f0c959bc7a1232e7fc026b8380ffb8beb398b607932e30a0",
+    "verified_raw_files": 4876,
+    "P14": false,
+    "P15": false,
+    "P16": false,
+    "P17": false,
+    "P18": false,
+    "formal_threshold_selected": false,
+    "limitations": [
+      "No formal acceptance, AR parity, graph or performance claim",
+      "No independent neural GRU/MLP/einsum kernel or full-weight-content proof",
+      "No preemption/reorder/EOS-position model coverage granted by calibration"
+    ],
+    "prior_run1_failure_preserved": true,
+    "CPU_archive_download_first_attempt_failed": true,
+    "exact_original_archive_recovered": true
+  },
+  "pending": [
+    "Scorer full correctness/lifecycle/stop acceptance independent of Base.",
+    "Matched Base on12 correctness plus paired logical metric evidence.",
+    "Source-bound native operation/synchronization/copy equivalence for actual model traces.",
+    "P18 matched workload performance and final delivery evidence."
+  ],
+  "CI_policy": "Unrelated inherited CI cleanup must not be mixed back into ECHO.",
+  "full_repository_CI_passed": false
+}
