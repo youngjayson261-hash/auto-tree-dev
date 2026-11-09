@@ -60,6 +60,9 @@ def _make_graph_manager(buffers, mode, uniform, capture_size):
     manager.max_num_reqs = len(buffers.seq_lens_cpu)
     manager.varlen_decode = False
     manager.ubatch_runner = None
+    manager.tree_full_graph_manager = None
+    manager.tree_mixed_batch = False
+    manager.tree_batch_shape = None
     manager.lora_capture_cases = [0]
     manager._capture_descs = {}
     manager._candidates = {}

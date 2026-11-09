@@ -1084,6 +1084,7 @@ def test_kvpp_history_ignores_padding_and_dummy_work(monkeypatch, computed, dumm
         positions=torch.arange(2),
         attn_state=None,
         tree_visibility=None,
+        slot_positions=None,
     )
     if not enabled:
         batch.num_computed_tokens_np = None  # Disabled KVPP must not inspect history.
