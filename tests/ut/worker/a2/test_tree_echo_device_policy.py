@@ -231,7 +231,8 @@ def test_int32_layout_and_original_buffers_are_preserved():
         lambda c: setattr(c.layout, "depths", c.layout.depths.float()),
         lambda c: setattr(c.layout, "parents", c.layout.parents[:, :1]),
         lambda c: setattr(c.layout, "num_nodes", c.layout.num_nodes[:0]),
-        lambda c: setattr(c, "summary", c.summary._replace(max_path_logp=c.summary.max_path_logp.double())),
+        # NPU casts unsupported fp64 to fp32; fp16 remains an invalid summary dtype.
+        lambda c: setattr(c, "summary", c.summary._replace(max_path_logp=c.summary.max_path_logp.half())),
         lambda c: setattr(c, "summary", c.summary._replace(valid_depths=c.summary.valid_depths[:, :1])),
         lambda c: setattr(c, "summary", c.summary._replace(invalid_scores=c.summary.invalid_scores.int())),
         lambda c: setattr(c, "bootstrap", c.bootstrap.int()),
