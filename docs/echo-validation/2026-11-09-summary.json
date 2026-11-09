@@ -1,7 +1,7 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T21:49:35.403044+00:00",
-  "scope": "Evidence-only update for source-specific finite Scorer native results and incomplete P18 diagnostics; production code unchanged.",
+  "recorded_utc": "2026-11-09T22:52:06.892373+00:00",
+  "scope": "Evidence-only update for independently reviewed six Base finite P18 diagnostics; formal performance remains pending; production unchanged.",
   "base_a5": {
     "scope": "Base full vocabulary, eager, pinned a0 source only",
     "passed": true,
@@ -138,7 +138,7 @@
   },
   "pending": [
     "Scorer full83 metrics-ON model capture, its own full P14/P15/P16 CPU replay, and matched OFF/ON analysis.",
-    "Base P18 native reader calibration and independent review, followed by all six diagnostic analyses.",
+    "Review the new Base formal collection package against the completed, independently reviewed six-diagnostic originals before collecting formal timings.",
     "Source-specific formal P18 admission, five timing repetitions per arm, and final evidence; no speedup claim."
   ],
   "CI_policy": "Unrelated inherited CI cleanup must not be mixed back into ECHO.",
@@ -726,7 +726,9 @@
     "original_AR_elapsed_seconds": 402.11008358,
     "native_analysis_complete": false,
     "diagnostic_capture_launch_admitted": true,
-    "formal_launch_allowed": false
+    "formal_launch_allowed": false,
+    "historical_snapshot_not_current_diagnostic_status": true,
+    "superseded_by": "Base_six_finite_P18_diagnostics"
   },
   "Scorer_five_arm_finite_native_evidence": {
     "scope": "finite exact-protocol off/on operation equivalence and host-ledger arithmetic only; no performance or universal trace claim",
@@ -765,6 +767,195 @@
     "global_trace_completeness_verified": false,
     "global_buffer_ownership_verified": false,
     "full83_metrics_ON_counterpart_passed": false,
+    "P17_overall": false,
+    "P18": false
+  },
+  "Base_six_finite_P18_diagnostics": {
+    "score_source": "base_full_vocab",
+    "captures": 6,
+    "complete_original_raw_analyses": 6,
+    "fresh_replays": 6,
+    "entire_report_equals_fresh_replay": true,
+    "aggregate": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/six-diagnostics-v2.json",
+      "bytes": 9531,
+      "sha256": "1a6ff4abe2a8b881ea96afeb2b18d40c4ee94c38b857fa62fabe5436ea5660cf"
+    },
+    "independent_result_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/independent-aggregate-review-v1.json",
+      "bytes": 8782,
+      "sha256": "16ce3665ec28bc0ff9964ee013f620ac215565963f0bf7fc60b385776e50317f"
+    },
+    "reader_freeze": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-native-component-provider-v7/source-freeze-v7.json",
+      "bytes": 2241,
+      "sha256": "2cfe02f53933303f93c9fa221eacec7517cc9aca73ee4a459a3ec2f4b7d944ec"
+    },
+    "reader_analyzer_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-diagnostic-analyzer-v8-controls/independent-review-candidate-v1.json",
+      "bytes": 11801,
+      "sha256": "7f96b1c6b24fded5ff2e63da3a0b3e484f375c72231012b0bafe61aa6086b351"
+    },
+    "capture_sequence_terminal": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-capture-sequence-v4/status.json",
+      "bytes": 1472,
+      "sha256": "5f36b18fc35844e7586137c505925054186bbd940550c6ab01ccf9f760392f8c"
+    },
+    "preserved_original_error": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-native-doc-delivery-v1/original-base-sequence-status.json",
+      "bytes": 346,
+      "sha256": "4f7dfa3f8177b5a7e0a5f2371c23cf13619f8fd03fab31df0a82a7b0097b5361"
+    },
+    "arms": [
+      {
+        "arm": "ar_control",
+        "attempt": "p18-base-profile-ar-control-v4",
+        "analysis": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/ar-control.json",
+          "bytes": 21746,
+          "sha256": "41e60e7b3b1e692dc3b0111de6535d4ff7b6d29dcee6afe784305e6fcafb7073"
+        },
+        "collection": {
+          "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-ar-control-v4/collection-manifest.json",
+          "bytes": 539082,
+          "sha256": "232e9e0022296c4af7776a731befdcab4bae4f4a5cc73042565adbdb5f246c0c"
+        },
+        "trusted_fresh_replay": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/aggregate-v2-trusted-replays/ar-control.json",
+          "bytes": 21746,
+          "sha256": "41e60e7b3b1e692dc3b0111de6535d4ff7b6d29dcee6afe784305e6fcafb7073"
+        },
+        "actual_members_hashed": 2598,
+        "unknown_TASKs": 1,
+        "timestamp_anomalies": 10
+      },
+      {
+        "arm": "default_fixed",
+        "attempt": "p18-base-profile-default-fixed-v4",
+        "analysis": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/default-fixed.json",
+          "bytes": 16091,
+          "sha256": "806beb687c26119225a8899e1a976e99419bcc177ef227722aacde18c116df1f"
+        },
+        "collection": {
+          "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-default-fixed-v4/collection-manifest.json",
+          "bytes": 622035,
+          "sha256": "22c6baf279b20ad894d05014b7dfd3b7f764afdd29d6379917b9197abff5322b"
+        },
+        "trusted_fresh_replay": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/aggregate-v2-trusted-replays/default-fixed.json",
+          "bytes": 16091,
+          "sha256": "806beb687c26119225a8899e1a976e99419bcc177ef227722aacde18c116df1f"
+        },
+        "actual_members_hashed": 2925,
+        "unknown_TASKs": 0,
+        "timestamp_anomalies": 4
+      },
+      {
+        "arm": "explicit_fixed",
+        "attempt": "p18-base-profile-explicit-fixed-v4",
+        "analysis": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/explicit-fixed.json",
+          "bytes": 16091,
+          "sha256": "b75bc8afe79dced2b263ed01b34f899cae9d5385b662a657a1cf12bb8147db04"
+        },
+        "collection": {
+          "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-explicit-fixed-v4/collection-manifest.json",
+          "bytes": 622077,
+          "sha256": "70f158d2fd5016dac5452aec850e469766220b2472f4c7d19af6c31cb51a9864"
+        },
+        "trusted_fresh_replay": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/aggregate-v2-trusted-replays/explicit-fixed.json",
+          "bytes": 16091,
+          "sha256": "b75bc8afe79dced2b263ed01b34f899cae9d5385b662a657a1cf12bb8147db04"
+        },
+        "actual_members_hashed": 2925,
+        "unknown_TASKs": 0,
+        "timestamp_anomalies": 4
+      },
+      {
+        "arm": "confidence_tau0",
+        "attempt": "p18-base-profile-confidence-tau0-v4",
+        "analysis": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/confidence-tau0.json",
+          "bytes": 16095,
+          "sha256": "2d846b0ac0893966cdd01c16fd3a657406d8bd0564e6169f6087ab99534425b8"
+        },
+        "collection": {
+          "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-confidence-tau0-v4/collection-manifest.json",
+          "bytes": 621472,
+          "sha256": "fbc2093ebea2d3044dcb5413279e9d788a1291f79da3d3a5dab29ae7db74a6b5"
+        },
+        "trusted_fresh_replay": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/aggregate-v2-trusted-replays/confidence-tau0.json",
+          "bytes": 16095,
+          "sha256": "2d846b0ac0893966cdd01c16fd3a657406d8bd0564e6169f6087ab99534425b8"
+        },
+        "actual_members_hashed": 2923,
+        "unknown_TASKs": 0,
+        "timestamp_anomalies": 4
+      },
+      {
+        "arm": "confidence_shortening",
+        "attempt": "p18-base-profile-confidence-shortening-v4",
+        "analysis": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/confidence-shortening.json",
+          "bytes": 21302,
+          "sha256": "d7d344bcda6098219987ba2ad1a0bea3ff541771a8a72ae542da6e9645607c5c"
+        },
+        "collection": {
+          "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-confidence-shortening-v4/collection-manifest.json",
+          "bytes": 733214,
+          "sha256": "9e88ce0bd4e209b02f4a3d921c3e4e8442a0250f2eee4a0d7b8c4ffdd771b420"
+        },
+        "trusted_fresh_replay": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/aggregate-v2-trusted-replays/confidence-shortening.json",
+          "bytes": 21302,
+          "sha256": "d7d344bcda6098219987ba2ad1a0bea3ff541771a8a72ae542da6e9645607c5c"
+        },
+        "actual_members_hashed": 3343,
+        "unknown_TASKs": 0,
+        "timestamp_anomalies": 8
+      },
+      {
+        "arm": "confidence_conservative",
+        "attempt": "p18-base-profile-confidence-conservative-v4",
+        "analysis": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/confidence-conservative.json",
+          "bytes": 21300,
+          "sha256": "75b0490cf83820c923709e110f2a0ea4c8bce0888b90d7c340705df25bcce9dc"
+        },
+        "collection": {
+          "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-confidence-conservative-v4/collection-manifest.json",
+          "bytes": 653873,
+          "sha256": "000712eb117c09b1b87cca692aea010245ff22dda8ff2c27645a1cc98bf35fc1"
+        },
+        "trusted_fresh_replay": {
+          "workspace_relative_path": "results/echo-all-p-20261109/p18-base-diagnostic-analysis-v8/aggregate-v2-trusted-replays/confidence-conservative.json",
+          "bytes": 21300,
+          "sha256": "75b0490cf83820c923709e110f2a0ea4c8bce0888b90d7c340705df25bcce9dc"
+        },
+        "actual_members_hashed": 3046,
+        "unknown_TASKs": 0,
+        "timestamp_anomalies": 8
+      }
+    ],
+    "independent_raw_files_hashed": 17760,
+    "independent_raw_bytes_hashed": 2727568702,
+    "independent_archive_bytes_hashed": 278463167,
+    "independent_TASK_rows": 211787,
+    "independent_compact_copy_pairs": 16288,
+    "unattributed_TASKs_retained": 1,
+    "timestamp_diagnostics_retained": 38,
+    "finite_diagnostic_readiness_reviewed": true,
+    "diagnostic_analysis_passed": true,
+    "formal_performance_samples": 0,
+    "formal_collection_preparation_review_pending": true,
+    "grants_Scorer": false,
+    "global_trace_completeness_verified": false,
+    "global_buffer_ownership_verified": false,
+    "CPU_device_clock_alignment_verified": false,
+    "physical_drain_verified": false,
     "P17_overall": false,
     "P18": false
   }

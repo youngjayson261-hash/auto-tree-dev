@@ -181,26 +181,39 @@ trace completeness or universal buffer ownership. Scorer still requires its
 own full83 metrics-ON capture, complete correctness/lifecycle replay and
 paired OFF/ON analysis before overall P17 can close. Base results are separate.
 
-P18 has no formal performance result. The first Base AR diagnostic completed
-with exit 0 in 402.1 seconds and its original 2,598 files were recovered with
-archive and member hashes. Its original native analysis failed on one
-unattributed zero-duration SQE. A new reader candidate retains that record
-with unknown ownership and work semantics; it does not infer zero work.
+P18 has no formal performance result. All six Base diagnostic captures now
+completed with clean exit 0 and were recovered. The independently reviewed
+V7 reader and V8 analyzer checked every original raw member, archive,
+configuration, loaded-source binding, asset inventory, cache state and
+same-source canonical output. The aggregate repeated all six full analyses
+and required each entire report to equal its fresh original-data replay.
 
-The same capture has ten recorded TASK intervals ending after the CPU root
-marker. Their unique submission chains remain assigned to other-root work.
-All 71,860 TASK rows lie within the device's own profiling-enable/disable
-window. Both explicit source synchronizations are inside the CPU marker;
-an additional outer synchronization is a separate observed pair. These facts
-do not prove CPU/device clock alignment or physical drain ordering. The new
-reader and all six diagnostic analyses still require independent validation.
+Independent result review checked all 17,760 raw files (2,727,568,702 bytes),
+278,463,167 archive bytes, 211,787 recorded TASK rows and 16,288 paired
+compact copy records. Recorded task denominators and raw copy count/byte
+vectors close within each finite capture. One unattributed zero-duration
+SQE and 38 timestamp diagnostics remain explicitly recorded. Unknown
+ownership and work semantics are retained; zero work is not inferred.
 
-The original error is preserved. A separately reviewed sequence collects the
-remaining five unchanged diagnostic packages serially; it does not grant
-analysis or formal timing acceptance. Preparation binds 6,439 model/runtime
-files before import. Formal timing remains blocked until diagnostics pass;
-it then requires matching outputs, fresh cache state, public warmup and five
-repetitions per arm. There is no speedup claim.
+The original AR analysis failure and failed dispatcher status remain intact.
+In that AR capture, all 71,860 TASK rows lie inside the device's own
+profiling-enable/disable window; ten intervals end after the CPU root marker
+while keeping their original other-root submission attribution. Both source
+synchronizations are inside the CPU marker; an additional outer pair is
+separate. These observations do not prove CPU/device clock alignment,
+physical drain ordering, global trace completeness or universal ownership.
+
+Fixed/tau0 captures use the original non-structured-output placeholder
+handler branch, which has no instrumented copy-event wait marker. Positive
+confidence delivery uses its separately verified marker contract. All native
+synchronization records remain counted; absent markers do not establish
+absence of synchronization. The source-derived branch and long-path member
+checks were independently reviewed before the six complete raw analyses.
+
+This is finite Base diagnostic readiness only. Scorer requires its own
+diagnostics. Formal timing still requires a separately reviewed collection
+package, matching outputs, fresh process/cache state, public warmup and five
+repetitions per arm. No formal performance sample or speedup is claimed.
 
 ## CI and change boundaries
 
