@@ -1,6 +1,6 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T15:06:43.534842+00:00",
+  "recorded_utc": "2026-11-09T17:03:16.364179+00:00",
   "scope": "Archive index and actual results only; original raw archives are stored outside this Git repository.",
   "production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
   "production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
@@ -267,5 +267,149 @@
     "P16": false,
     "P17": false,
     "P18": false
+  },
+  "scorer_r5_formal_run1_failed": {
+    "P14": false,
+    "P15": false,
+    "P16": false,
+    "P17": false,
+    "P18": false,
+    "passed": false,
+    "modes": 12,
+    "generate_cases": 83,
+    "issues": [
+      "dynamic/persistent_packet_lifetime: ValueError: metadata trace lacks a single-process ordered witness",
+      "conservative/persistent_packet_lifetime: ValueError: metadata trace lacks a single-process ordered witness",
+      "root_only_budget/persistent_packet_lifetime: ValueError: metadata trace lacks a single-process ordered witness",
+      "preempt_dynamic/persistent_packet_lifetime: ValueError: metadata trace lacks a single-process ordered witness",
+      "controlled_eos17_tree/persistent_packet_lifetime: ValueError: metadata trace lacks a single-process ordered witness",
+      "controlled_eos18_tree/persistent_packet_lifetime: ValueError: metadata trace lacks a single-process ordered witness",
+      "P15/B03: missing actual persistent-packet owner/view and completed-copy-before-rewrite proof"
+    ],
+    "mathematical_failure_established": false,
+    "comparison": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-formal-r5-run1-comparison-v2-single-thread/comparison-v3.json",
+      "bytes": 223160,
+      "sha256": "74a01c25ecce596fb1b898c4ede5c3db287f75b6dee325442e815ee08babbfbb"
+    },
+    "strict_CPU_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-formal-r5-run1-comparison-v2-single-thread/status.json",
+      "bytes": 2446,
+      "sha256": "ad663350415abae3f59e341845427dcd841619a603aa8c846c9fc3ab21968df4"
+    },
+    "prior_CPU_timeout": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-formal-r5-run1-comparison-v1/replay.result.json",
+      "bytes": 1126,
+      "sha256": "e46871caad1a678c9598e7b8a4e568a3309641d76d90579b2beb21e1d50d49f7"
+    },
+    "actual_ordering_failure_audit": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-run1-trace-order-failure-audit-v1.json",
+      "bytes": 5953,
+      "sha256": "aa1bce28233388c2e10a722f5cb4c8c8c7f987d149c56e8dd942f8a01c091bf6"
+    },
+    "collection_manifest": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/scorer-formal-r5-run1/collection-manifest.json",
+      "bytes": 640752,
+      "sha256": "ac53c642d2706cc4120e7948762736df1a9a3c6ed945c4c037241ae4f67558b2"
+    },
+    "pre_run_oracle": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-oracle-v1/freeze.json",
+      "bytes": 30306,
+      "sha256": "8848fc26566eb8e59b9de51b0e070984a1873e6e781354946d049e96119f45e7"
+    },
+    "source_changed": [],
+    "raw_changed": [],
+    "proof_changed": [],
+    "failure": "separate identical observer modules split per-process order and last_get registries"
+  },
+  "scorer_shared_order_repair_v2": {
+    "P14": false,
+    "P15": false,
+    "P16": false,
+    "P17": false,
+    "P18": false,
+    "scope": "diagnostic capture preparation only",
+    "changed_functions": [
+      "scorer_capture._load_trace"
+    ],
+    "production_code_changes": 0,
+    "oracle_changes": 0,
+    "host_tests": 9,
+    "host_skips": 0,
+    "staged_CPU_tests": 108,
+    "staged_CPU_skips": 0,
+    "preparation": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-trace-order-repair-v2/repair-checks.json",
+      "bytes": 8894,
+      "sha256": "a5fa07efea67f3fbad2c45eda54cc937cb62628d4316ae0d83bfc87bca45ee27"
+    },
+    "ready": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v2/transport-ready.json",
+      "bytes": 12348,
+      "sha256": "db851c81e119f2da5bb0ec8f9127fa753bc161ed8e340eee994e15e3855409ca"
+    },
+    "independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v2/independent-review.json",
+      "bytes": 1497,
+      "sha256": "a2c9dbf35228d906c9ac55487385c4419f3e0cf26b1d53a2618318175fe31954"
+    },
+    "actual_staged_CPU": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v2/root-cpu-01.json",
+      "bytes": 19916,
+      "sha256": "5cbe6b5fd83fadc92116ad45f35640b83bb25c483f2854d86eaa69bcb09515b1"
+    },
+    "actual_launch": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v2/root-run-01.json",
+      "bytes": 536,
+      "sha256": "3980e17c00d30e4875e27734c3f0f6d825f4ac88f3868fd1006cd7c530f35abe"
+    },
+    "replacement_run": "scorer-formal-r5-run2",
+    "replacement_formal_acceptance_pending": true
+  },
+  "p17_model_native_schema_run3": {
+    "P14": false,
+    "P15": false,
+    "P16": false,
+    "P17": false,
+    "P18": false,
+    "scope": "single Base confidence0.5 canonical34/128 schema diagnostic",
+    "raw_files": 4037,
+    "raw_bytes": 499245393,
+    "archive_sha256": "c2fed929a6a0307dded3a080603990e1fc870e93738ffd840d9b452b2d6c655e",
+    "actual_single_save_state_verified": true,
+    "trace_completeness_verified": false,
+    "D2H_count": null,
+    "synchronization_count": null,
+    "NPU_work_count": null,
+    "save_check": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-model-run3-native-save-check-v1.json",
+      "bytes": 1560,
+      "sha256": "e1083bb4dc2918b5b0a4da8a9be94ee349a6c18a039fd473e2b08d0610945210"
+    },
+    "terminal": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-model-schema-capture-v4/root-status-04.json",
+      "bytes": 52380,
+      "sha256": "4168b65ff20e1aba18adb41bf8bc4332bf6731d16f1d761cfb857e5e50879240"
+    },
+    "collection_manifest": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/p17-model-schema-r5-run3/collection-manifest.json",
+      "bytes": 930010,
+      "sha256": "c6bf3d1a3979940feae4da34a83a9c1d7f2f2d59bca8b30f26717479cab1e0c1"
+    },
+    "database_inventory": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-native-model-db-inventory-v2.json",
+      "bytes": 16990,
+      "sha256": "c289b541ba6d994e0f13e39ae3ec9e6a4c4df7e7300d98b2f9cb3af7a6613d29"
+    },
+    "export_log_audit": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-run3-export-log-audit-v1.json",
+      "bytes": 429629,
+      "sha256": "a4addd984a0606d1a1c55da068f535555ba7e97b7c7264aa1e9f5e08d44eb203"
+    },
+    "remaining": [
+      "source-bound native attribution and event completeness",
+      "actual observer off/on equivalence",
+      "P18 performance"
+    ]
   }
 }
