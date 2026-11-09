@@ -71,6 +71,8 @@ The following table lists additional configuration options available in vLLM Asc
 | `enable_pcp_o_proj_weight_sharding` | bool | `True` | Whether PCP shards O-projection weights across the PCP group. This option controls SFA-PCP `o_proj` and DSA-PCP two-stage O-projection (`wo_a`/`wo_b`). If the weight method or PCP partition does not support sharding, the option is disabled with a warning. Set it to `false` at server startup to disable sharding. Other attention backends do not use this option. |
 | `enable_pcp_embedding_lmhead_weight_sharding` | bool | `True` | Whether PCP shards embedding and LM Head weights across PCP ranks inside each TP shard. This option is enabled by default, takes effect when PCP size is greater than 1, and is incompatible with batch-sharded sampling (`enable_batch_sharded_sampling`) and fine-grained TP for these modules. |
 | `rejection_sampler_config`          | dict | `{}`    | Configuration options for rejection sampler (block verify and entropy verify). |
+| `dynamic_spec_config`               | dict | `{}`    | Configuration options for Dynamic Speculative Decoding. See [Dynamic Speculative Decoding](../feature_guide/speculative_decoding.md#dynamic-speculative-decoding). |
+| `tree_spec_config`                  | dict | `{}`    | Model Runner V2 tree construction and verification budgets. See [Tree confidence verification](#tree_spec_config). |
 | `multistream_dsv4_dsa_overlap`      | bool | `True`  | Whether to enable dsa multi-stream overlap for DeepSeek V4.  |
 | `rl_config`                        | dict | `{}`    | One-click RL mode configuration. See <a href="#rl_config">rl_config</a> for all fields, the two deployment modes, usage examples, and the migration guide. |
 | `combine_quant_mode`                | int  | `0`     | Fused MC2 configuration. This configuration will be passed as the `comm_quant_mode` argument for the `torch_npu.npu_moe_distribute_combine_v2` operator. Please refer to the operator documentation for the valid value range. |
@@ -218,6 +220,88 @@ Enable Entropy Verify with `enable_entropy_verify=true` and `speculative_config.
 | `enable_entropy_verify` | bool  | `False` | Whether to enable entropy verify mode. Entropy verify adjusts the acceptance threshold based on the entropy of the target distribution — higher entropy (uncertain) tokens get a lower threshold (easier to accept), while lower entropy (confident) tokens get a stricter threshold. |
 | `posterior_threshold`   | float | `0.95`  | Upper bound for the entropy-adjusted acceptance threshold. Must be in (0, 1]. The effective threshold is `min(exp(-entropy * posterior_alpha), posterior_threshold)`. |
 | `posterior_alpha`       | float | `0.4`   | Scaling factor for entropy in the threshold computation. Must be >= 0. Higher values make the threshold more sensitive to entropy — high-entropy tokens become much easier to accept, improving performance but reducing precision. |
+
+**dynamic_spec_config**
+
+> **Note**: This is an exploratory feature for model runner v1. Supported methods are `"dspark"` (DSpark confidence head) and `"dflash"` (head-free; uses max-softmax over draft logits as a confidence proxy). You still need a matching `speculative_config` (`method: "dspark"` or `"dflash"`); `dynamic_spec_config` only controls how many drafted tokens are verified per request. See [Dynamic Speculative Decoding](../feature_guide/speculative_decoding.md#dynamic-speculative-decoding) for usage and limitations.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `method` | str | `None` | Dynamic method name. Supported values: `"dspark"`, `"dflash"`. Omit or set to `None` to disable. |
+| `method_params` | dict | `{}` | Method-specific hyperparameters. When empty, each method falls back to its built-in defaults. |
+
+**dynamic_spec_config.method_params** (when `method` is `"dspark"` or `"dflash"`)
+
+`dspark` and `dflash` share the same scheduling hyperparameters. The difference is only how per-token acceptance confidence is estimated: DSpark uses its confidence head (`sigmoid`), while DFlash (head-free) uses `max(softmax(logits))` of the drafted token.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `initial_verify_budget_per_req` | int | `5` | Initial per-request verify budget before the first recompute. |
+| `budget_update_interval` | int | `16` | Recompute the shared verify budget every N decode steps. |
+| `budget_threshold` | float | `0.3` | Cumulative survival-probability threshold used when estimating the mean verify budget. |
+| `min_verify_tokens` | int | `1` | Minimum number of draft tokens verified per request. |
+
+<span id="tree_spec_config"></span>**tree_spec_config (Model Runner V2)**
+
+Tree confidence verification selects a prefix of an already constructed draft
+tree. `budget` counts non-root nodes; the root is additional. Enable a compatible
+draft through `speculative_config` as well. The loaded draft model selects the
+scorer. The positive-threshold confidence path currently admits exact Independent
+and Domino scorers with the validated full-vocabulary identity token mapping.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `enabled` | bool | `false` | Enable tree speculation. |
+| `budget` | int or null | `null` | Non-root tree node budget, required and positive when enabled; must cover `num_speculative_tokens`. |
+| `topk` | int or null | `null` | Retained frontier width bound, required and positive when enabled. |
+| `candidate_size` | int or null | `64` | Domino Top-C shortlist setting; `null` uses the current tree width. Other admitted scorers retain their own normalization. |
+| `depth_penalty` | float or null | `null` | Tree-selection depth penalty. `null` keeps the scorer default; the penalty does not enter confidence probabilities. |
+| `keep_origin_chain` | bool | `false` | Preserve the draft origin chain during tree selection. |
+| `verification_policy` | str | `"fixed"` | `"fixed"` verifies the available tree budget; `"confidence"` enables threshold-based prefix selection. |
+| `verification_threshold` | float | `0.0` | Finite threshold in `[0, 1]`. Zero retains fixed-budget behavior without confidence score accumulation. |
+| `verification_confidence_source` | str | `"base_full_vocab"` | `"base_full_vocab"` uses the original full-vocabulary distribution; `"scorer_logprob"` reuses normalized edge log probabilities from the admitted scorer. |
+
+The compatible default, `base_full_vocab`, keeps the original confidence source.
+For Domino, explicitly selecting `scorer_logprob` uses base full-vocabulary log
+probabilities at depth slots before the loaded model's `prefix_len`, then the
+corrected Top-C proposal distribution. The effective shortlist is
+`C = width` when `candidate_size` is `null`; otherwise it is
+`max(width, min(candidate_size, vocab_size))`, where
+`width = min(topk, vocab_size, budget)`. Returned top-k scores are not normalized
+again. Each edge log probability is accumulated along its actual parent path;
+these proposal confidences are not target-model acceptance probabilities.
+
+Pass the following JSON as `--additional-config`, or its equivalent as the
+offline `additional_config` argument. The threshold `0.1` demonstrates the
+configuration syntax and is not a calibrated setting:
+
+```json
+{
+  "tree_spec_config": {
+    "enabled": true,
+    "budget": 48,
+    "topk": 8,
+    "candidate_size": 64,
+    "verification_policy": "confidence",
+    "verification_threshold": 0.1,
+    "verification_confidence_source": "scorer_logprob"
+  }
+}
+```
+
+Calibrate thresholds separately for each source, and revalidate after changing C
+or the scoring configuration. Loading a confidence configuration records the
+source, threshold, candidate-size rule and prefix segmentation in the log.
+Current runtime admission requires Model Runner V2, synchronous eager execution,
+TP=1, PP=1, DP=1, PCP=1, DCP=1, one in-flight batch, one root token and greedy
+tree verification. Each fine-grained module TP size must be disabled (`0`) or
+single-rank (`1`); multi-rank module settings are not admitted.
+Tree graph execution, an adaptive verification manager, grammar constraints and
+non-default sampling processors are not admitted by this path. Selecting
+`verification_policy="confidence"` with a zero threshold uses the fixed path
+without confidence scoring, budget transport or confidence runtime admission.
+These are the current implementation boundaries; other
+scorers and parallel modes require their own validation.
 
 **scheduler_config.short_request_first_config**
 

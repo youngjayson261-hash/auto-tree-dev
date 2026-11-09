@@ -159,6 +159,49 @@ def admit_base_confidence_scorer(scorer_type, independent_type, domino_type, ful
     return full_vocab_proven is True and (scorer_type is independent_type or scorer_type is domino_type)
 
 
+def admit_verification_confidence_scorer(
+    scorer_type, independent_type, domino_type, full_vocab_proven: bool, source: str = "base_full_vocab"
+) -> bool:
+    """Admit exact adapters with proven logp semantics and global token IDs.
+
+    In scorer_logprob mode the full-vocabulary proof establishes the current
+    token-ID mapping boundary, not the normalization range of the edge scores.
+    Independent uses its full distribution; Domino may use its Top-C proposal.
+    Other scorers and subclasses must prove their own score and mapping contract.
+    """
+    return source in ("base_full_vocab", "scorer_logprob") and admit_base_confidence_scorer(
+        scorer_type, independent_type, domino_type, full_vocab_proven
+    )
+
+
+def confidence_source_metadata(
+    *, source, scorer_name, candidate_size, prefix_len, width, vocab_size, threshold
+) -> dict:
+    """Describe the loaded score source using host-only model/config metadata."""
+    if source not in ("base_full_vocab", "scorer_logprob"):
+        raise ValueError("verification_confidence_source must be base_full_vocab or scorer_logprob")
+    domino = scorer_name == "domino"
+    effective_candidates = None
+    if domino:
+        effective_candidates = width if candidate_size is None else max(width, min(candidate_size, vocab_size))
+    return {
+        "source": source,
+        "scorer": scorer_name,
+        "threshold": threshold,
+        "score_semantics": "proposal_path_logprob",
+        "candidate_size_configured": candidate_size if domino else None,
+        "candidate_size_effective": effective_candidates,
+        "candidate_size_rule": "width if candidate_size is None else max(width, min(candidate_size, vocab_size))",
+        "frontier_width": width,
+        "frontier_width_rule": "min(topk, vocab_size, budget)",
+        "prefix_len": prefix_len if domino else 0,
+        "prefix_rule": "depth_slot < prefix_len",
+        "prefix_score_source": "base_full_vocab",
+        "suffix_score_source": "domino_top_c" if source == "scorer_logprob" and domino else "base_full_vocab",
+        "token_mapping_requirement": "full_vocab_identity",
+    }
+
+
 def validate_runtime_facts(
     *,
     async_scheduling,

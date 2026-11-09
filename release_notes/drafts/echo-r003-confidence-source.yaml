@@ -1,0 +1,11 @@
+# Draft for R003: no PR number has been assigned. Move these entries into a
+# numbered release_notes/fragments file when the actual PR is created.
+entries:
+  - category: feature
+    text: >-
+      Added tree_spec_config.verification_confidence_source so admitted tree
+      scorers can use their existing normalized candidate log probabilities
+      for confidence verification, while base_full_vocab remains the default.
+      Domino scorer_logprob uses full-vocabulary scores before prefix_len and
+      its corrected Top-C proposal afterwards; tune thresholds for this source
+      and revalidate when candidate_size or scoring settings change.

@@ -54,6 +54,7 @@ def make_runner(config):
     runner.vllm_config = config
     runner.ascend_config = SimpleNamespace(finegrained_tp_config=FinegrainedTPConfig())
     runner._tree_budget_enabled = True
+    runner._tree_confidence_requested = True
     runner.speculator = speculator
     runner.model_state = SimpleNamespace(num_new_sampled_tokens_per_step=1)
     runner.adaptive_verification = None
@@ -65,14 +66,16 @@ def make_runner(config):
     return runner
 
 
-def test_default_and_tau_zero_keep_fixed_path():
+def test_default_and_tau_zero_keep_fixed_budget():
     assert TreeSpecConfig().verification_policy == "fixed"
     assert TreeSpecConfig().verification_threshold == 0.0
     for policy in ("fixed", "confidence"):
         config = TreeSpecConfig(enabled=True, budget=48, topk=8, verification_policy=policy, verification_threshold=0.0)
         assert not config.confidence_verification_enabled
+        assert config.confidence_verification_requested is (policy == "confidence")
     runner = NPUModelRunner.__new__(NPUModelRunner)
     runner._tree_budget_enabled = False
+    runner._tree_confidence_requested = False
     runner._validate_tree_confidence_runtime()
 
 
