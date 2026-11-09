@@ -25,9 +25,10 @@ No Base result grants correctness to the Scorer confidence source.
 
 The isolated r5 candidate has 4,728 source files and manifest
 `69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b`.
-This change delivers its exact nine reviewed runtime/test files on top of the
-previous production code `a0f8a105`. The evidence index binds every delivered
-file to the tested snapshot. This delivery does not grant overall P17 or P18.
+Commit `48071690` delivered its exact nine reviewed runtime/test files on top
+of production code `a0f8a105`. This documentation update changes no production
+code. The index binds the delivered files to the tested snapshot; overall
+P17 and P18 remain ungranted.
 
 ## What the Scorer calibration establishes
 
@@ -166,17 +167,40 @@ Original failures are not rewritten. Neither global trace completeness nor
 universal buffer ownership is claimed. This reviewed finite Base evidence still
 requires the exact P18 provider and plan to be reviewed before P18 admission.
 
-Scorer has its own formal correctness/lifecycle pass. Its five-arm native
-off/on sequence is running separately with thresholds 0.50/0.05; Base native
-results do not grant Scorer P17. The earlier tiny copy calibration remains a
-calibration only, not a model-wide zero-copy proof.
+Scorer has its own formal correctness/lifecycle pass. Its separate five-arm
+native off/on suite now completed all ten captures with thresholds 0.50/0.05.
+The finite replay and independent review passed. Shortening consumed 11
+proposals, including nine shrinks; matched S/A/V/accepted totals were
+528/322/322/125. The other four arms consumed nine proposals each, without
+shrinks, and had 432/432/432/123. All ten canonical outputs match.
 
-P18 has no measured performance result. Preparation includes a reviewed
-component reader and CPU fingerprints for 6,439 selected model/runtime files.
-The complete owned-task wiring is still under preparation. Actual component
-diagnostics must pass before formal timing can be admitted. Formal comparison
-requires the fixed input, matching outputs, fresh cache state, public warmup,
-five repetitions per arm and original logs. There is no speedup claim.
+Scorer explicit-fixed retains its original strict failure at 23 versus 24
+diagnostic completion points. Its limited conditional comparison passed;
+the other four strict comparisons passed. This does not establish global
+trace completeness or universal buffer ownership. Scorer still requires its
+own full83 metrics-ON capture, complete correctness/lifecycle replay and
+paired OFF/ON analysis before overall P17 can close. Base results are separate.
+
+P18 has no formal performance result. The first Base AR diagnostic completed
+with exit 0 in 402.1 seconds and its original 2,598 files were recovered with
+archive and member hashes. Its original native analysis failed on one
+unattributed zero-duration SQE. A new reader candidate retains that record
+with unknown ownership and work semantics; it does not infer zero work.
+
+The same capture has ten recorded TASK intervals ending after the CPU root
+marker. Their unique submission chains remain assigned to other-root work.
+All 71,860 TASK rows lie within the device's own profiling-enable/disable
+window. Both explicit source synchronizations are inside the CPU marker;
+an additional outer synchronization is a separate observed pair. These facts
+do not prove CPU/device clock alignment or physical drain ordering. The new
+reader and all six diagnostic analyses still require independent validation.
+
+The original error is preserved. A separately reviewed sequence collects the
+remaining five unchanged diagnostic packages serially; it does not grant
+analysis or formal timing acceptance. Preparation binds 6,439 model/runtime
+files before import. Formal timing remains blocked until diagnostics pass;
+it then requires matching outputs, fresh cache state, public warmup and five
+repetitions per arm. There is no speedup claim.
 
 ## CI and change boundaries
 

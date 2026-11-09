@@ -1,7 +1,7 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T20:15:27.835433+00:00",
-  "scope": "Actual evidence index plus exact tested runtime-file delivery binding; raw archives remain outside Git.",
+  "recorded_utc": "2026-11-09T21:49:35.403044+00:00",
+  "scope": "Evidence-only update for source-specific finite Scorer native results and incomplete P18 diagnostics; production code unchanged.",
   "base_a5": {
     "scope": "Base full vocabulary, eager, pinned a0 source only",
     "passed": true,
@@ -30,7 +30,7 @@
     "source_files": 4728,
     "source_manifest_sha256": "69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b",
     "isolated_runtime_candidate": true,
-    "exact_nine_runtime_files_included_in_this_commit": true
+    "exact_nine_runtime_files_included_in_this_commit": false
   },
   "base_r5_off": {
     "attempt": "p17-off-r5-v3",
@@ -137,9 +137,9 @@
     "exact_original_archive_recovered": true
   },
   "pending": [
-    "Scorer source-specific five-arm native operation/synchronization/copy equivalence.",
-    "Independent exact P18 provider, plan, assets and owned per-task transport admission.",
-    "Separate P18 component diagnostics, then repeated matched formal timing and final evidence."
+    "Scorer full83 metrics-ON model capture, its own full P14/P15/P16 CPU replay, and matched OFF/ON analysis.",
+    "Base P18 native reader calibration and independent review, followed by all six diagnostic analyses.",
+    "Source-specific formal P18 admission, five timing repetitions per arm, and final evidence; no speedup claim."
   ],
   "CI_policy": "Unrelated inherited CI cleanup must not be mixed back into ECHO.",
   "full_repository_CI_passed": false,
@@ -538,7 +538,7 @@
   "prior_production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
   "prior_production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
   "runtime_delivery": {
-    "included_in_this_commit": true,
+    "included_in_this_commit": false,
     "base_commit": "38c5bfdc47adf5d4fbd0d30b33814da8a3e5597c",
     "tested_snapshot": "bcfb69c2cfaf9eab6a45226b674e3e9669edee5b",
     "tested_source_manifest_sha256": "69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b",
@@ -613,7 +613,8 @@
     "unrelated_CI_cleanup_included": false,
     "public_API_or_configuration_added": false,
     "P17_overall": false,
-    "P18": false
+    "P18": false,
+    "delivered_commit": "48071690bf9ee3c99a62c787a784dcd2d2ad9bbd"
   },
   "Base_five_arm_finite_native_evidence": {
     "scope": "finite exact-protocol off/on operation equivalence and host-ledger arithmetic only; no performance or universal trace claim",
@@ -671,7 +672,7 @@
       "bytes": 1186,
       "sha256": "2591e6f41ce9914e88980079232f15cf32442f6f5bda341022e483374e2bd43b"
     },
-    "scope": "collection in progress at documentation snapshot; no final native verdict",
+    "scope": "Historical in-progress snapshot retained; superseded by the finite result below.",
     "P17": false,
     "P18": false
   },
@@ -679,7 +680,8 @@
     "component_reader_freeze": {
       "workspace_relative_path": "results/echo-all-p-20261109/p18-native-component-provider-v3/source-freeze-v3.json",
       "bytes": 1309,
-      "sha256": "8714b0d2142cdbe24f27b69d36c1af3b08ab5ff2dcd3e15dae0d0200aa2c8d50"
+      "sha256": "8714b0d2142cdbe24f27b69d36c1af3b08ab5ff2dcd3e15dae0d0200aa2c8d50",
+      "scope": "Original reviewed reader; first actual AR analysis failed and is preserved."
     },
     "component_reader_review": {
       "workspace_relative_path": "results/echo-all-p-20261109/p18-native-component-provider-v3/independent-review-v3.json",
@@ -694,6 +696,76 @@
     "selected_files": 6439,
     "actual_performance_samples": 0,
     "launch_allowed": false,
+    "P18": false,
+    "original_sequence_error_snapshot": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-native-doc-delivery-v1/original-base-sequence-status.json",
+      "bytes": 346,
+      "sha256": "4f7dfa3f8177b5a7e0a5f2371c23cf13619f8fd03fab31df0a82a7b0097b5361"
+    },
+    "original_AR_collection": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/p18-base-profile-ar-control-v4/collection-manifest.json",
+      "bytes": 539082,
+      "sha256": "232e9e0022296c4af7776a731befdcab4bae4f4a5cc73042565adbdb5f246c0c"
+    },
+    "remaining_capture_snapshot": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-native-doc-delivery-v1/remaining-base-captures-status.json",
+      "bytes": 332,
+      "sha256": "6b1e3ad896602238c45403e6dbdffdd5689faad6214d5c691b1975141df5471d"
+    },
+    "remaining_capture_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-base-remaining-capture-review-v1.json",
+      "bytes": 5084,
+      "sha256": "3c08bb7844c550e9d2d8e48876d38774069de6c4d4865c7f0101bbc34dc5a228"
+    },
+    "timing_diagnosis": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-placeholder-review-v1/timing-contract-addendum2-v1.json",
+      "bytes": 30488,
+      "sha256": "8b39f46a3ca7b1d08812c76f7cc27c0a46dd5ae8107ec57d39c3e3223980fb20"
+    },
+    "original_AR_clean_exit": true,
+    "original_AR_elapsed_seconds": 402.11008358,
+    "native_analysis_complete": false,
+    "diagnostic_capture_launch_admitted": true,
+    "formal_launch_allowed": false
+  },
+  "Scorer_five_arm_finite_native_evidence": {
+    "scope": "finite exact-protocol off/on operation equivalence and host-ledger arithmetic only; no performance or universal trace claim",
+    "score_source": "scorer_logprob",
+    "report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-source-native-aggregate-v1/scorer-result-v1.json",
+      "bytes": 29063,
+      "sha256": "1403594aff2d983c10cf326de90bfc8511c0e49514eaa881eef6be7ede17f2f0"
+    },
+    "independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-source-native-aggregate-v1/scorer-independent-review-v1.json",
+      "bytes": 26581,
+      "sha256": "4bcbb11ee208250637cd1a6e907f7f80828594b893e1b49b6ef8c80097f1478c"
+    },
+    "pairs": 5,
+    "captures": 10,
+    "production_files": 811,
+    "finite_checks_passed": true,
+    "strict_all_records_equal": [
+      true,
+      false,
+      true,
+      true,
+      true
+    ],
+    "shortening_matched_consumption_counts": {
+      "S": 528,
+      "A": 322,
+      "V": 322,
+      "accepted_non_root": 125
+    },
+    "consumed_proposals": 11,
+    "actual_consumed_shrink_rounds": 9,
+    "canonical_outputs_all_equal": true,
+    "retained_conditional_completion_point_differences": true,
+    "global_trace_completeness_verified": false,
+    "global_buffer_ownership_verified": false,
+    "full83_metrics_ON_counterpart_passed": false,
+    "P17_overall": false,
     "P18": false
   }
 }
