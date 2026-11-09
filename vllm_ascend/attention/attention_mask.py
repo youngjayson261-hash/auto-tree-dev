@@ -184,14 +184,12 @@ class AttentionMaskBuilder:
             )
         return self.chunked_prefill_attn_mask
 
-    def get_attention_mask(
+    def get_tree_attention_mask(
         self,
-        causal: bool,
-        model_config: ModelConfig,
-        tree_visibility: torch.Tensor | None = None,
-        seq_lens: torch.Tensor | None = None,
-        num_decode: int = 0,
-        num_tokens: int = 0,
+        tree_visibility: torch.Tensor,
+        seq_lens: torch.Tensor,
+        num_decode,
+        query_lens: list[int] | None = None,
         for_capture: bool = False,
         common_attn_metadata=None,
     ):
@@ -218,9 +216,11 @@ class AttentionMaskBuilder:
                 if for_capture and not tree_shaped:
                     return self.get_splitfuse_attn_mask()
                 return self.get_tree_attention_mask(
+                return self.get_tree_attention_mask(
                     tree_visibility,
                     seq_lens,
                     num_decode,
+                    query_lens=query_lens,
                     for_capture=for_capture,
                     common_attn_metadata=common_attn_metadata,
                 )
@@ -230,12 +230,16 @@ class AttentionMaskBuilder:
 
         return self.get_splitfuse_attn_mask()
 
-    def get_tree_attention_mask(
+    def get_attention_mask(
         self,
-        tree_visibility: torch.Tensor,
-        seq_lens: torch.Tensor,
-        num_decode,
+        causal: bool,
+        model_config: ModelConfig,
+        tree_visibility: torch.Tensor | None = None,
+        seq_lens: torch.Tensor | None = None,
+        num_decode: int = 0,
+        num_tokens: int = 0,
         for_capture: bool = False,
+        query_lens: list[int] | None = None,
         common_attn_metadata=None,
     ):
         max_nodes = tree_visibility.shape[-1]
@@ -243,6 +247,11 @@ class AttentionMaskBuilder:
         max_caps = self._resolved_tree_caps()
         if max_caps is not None:
             query_len = max(query_len, max_caps[1])
+        if query_lens is None:
+            query_lens = [query_len] * num_decode
+        if len(query_lens) != num_decode or any(not 0 < length <= query_len for length in query_lens):
+            raise ValueError("Tree query lengths must match requests and fit the visibility capacity")
+        ragged = any(length != query_len for length in query_lens)
         num_mask = min(num_decode, tree_visibility.shape[0], seq_lens.shape[0])
         # seq_lens is host metadata (CPU). Caps already cover max_model_len.
         if max_caps is not None:
@@ -285,7 +294,7 @@ class AttentionMaskBuilder:
         ):
             return attn_mask
         mask_slice = attn_mask[:num_mask]
-        if mask_slice.device.type == "npu" and mask_slice.is_contiguous():
+        if not ragged and mask_slice.device.type == "npu" and mask_slice.is_contiguous():
             from vllm_ascend.ops.triton.spec_decode.tree.attention_mask import (
                 fill_tree_attention_mask_triton,
             )
@@ -311,13 +320,20 @@ class AttentionMaskBuilder:
         attn_mask.fill_(True)
         for i in range(num_mask):
             req_mask = attn_mask[i, 0]
-            prev_kv_len = int(seq_lens[i]) - query_len
-            req_mask[:, : prev_kv_len + 1] = False
+            actual_query_len = query_lens[i]
+            seq_len = int(seq_lens[i])
+            if not actual_query_len <= seq_len <= cap_kv:
+                raise ValueError("Tree KV length must contain the actual queries and fit the mask")
+            prev_kv_len = seq_len - actual_query_len
+            req_mask[:actual_query_len, : prev_kv_len + 1] = False
             # tree_visibility: True = can attend; FIA bool mask: True = masked out.
             # Draft columns are slot-indexed (contiguous j). KV slot_mapping uses
             # unique token-index coordinates while RoPE positions stay depth-based.
             draft_start = prev_kv_len + 1
-            req_mask[1:, draft_start : draft_start + max_nodes] = ~tree_visibility[i]
+            num_drafts = actual_query_len - 1
+            req_mask[1:actual_query_len, draft_start : draft_start + num_drafts] = ~tree_visibility[
+                i, :num_drafts, :num_drafts
+            ]
         self._sync_tree_fia_bsnd(num_decode, query_len, cap_kv)
         if qsl is not None:
             self._tree_mask_done = (
