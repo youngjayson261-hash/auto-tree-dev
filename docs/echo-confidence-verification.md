@@ -1,6 +1,6 @@
 # ECHO confidence verification: evidence and remaining work
 
-This record separates Base correctness from Scorer probability calibration.
+This record separates Base correctness, Scorer calibration and Scorer formal acceptance.
 The accompanying [evidence index](echo-validation/2026-11-09-summary.json) pins
 the actual reports, raw archive hashes and source versions. Original raw tensor
 archives remain in the experiment workspace; this Git repository contains an
@@ -15,7 +15,8 @@ single-card, greedy protocol.
 | Base r5 off12 candidate | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Same-source candidate with observation disabled |
 | Base r5 on12 candidate | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Same-source candidate with observation enabled |
 | Base r5 paired replay | Logical counters and paired semantics passed | Native model profiling remains required |
-| Scorer r5 run2 | Strict probability calibration passed; issues empty | Calibration only; formal threshold remains unselected |
+| Scorer calibration r5 run2 | Strict probability calibration passed; issues empty | Calibration only |
+| Scorer formal r5 run2 | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Independent Scorer-only correctness and lifecycle suite |
 
 All three Base acceptance replays checked the original tensors and lifecycle/stop
 proofs. Their source, raw data and proof files remained unchanged. The a5 archive
@@ -51,7 +52,8 @@ Run2 calibration does not establish AR output parity, full stop/commit state,
 request reordering, preemption or slot reuse for Scorer. It does not validate
 graph mode, random sampling, independent neural-kernel arithmetic or complete
 weight contents. Threshold 0.5 is a trial value, not a selected production
-threshold. Scorer P14/P15/P16 and both P17/P18 completion flags remain false.
+threshold. At that calibration stage, Scorer P14/P15/P16 were ungranted. The separate
+formal result below supersedes that pending status; P17/P18 remain ungranted.
 
 ## Formal Scorer failure and diagnostic repair
 
@@ -65,14 +67,31 @@ not by itself establish a model arithmetic failure.
 
 The first CPU attempt timed out after 900 seconds. The single-thread replay
 then completed in 1,755 seconds without timeout. Both attempts are retained.
-Source, raw-data and oracle hashes remained unchanged. Scorer P14/P15/P16
-remain ungranted.
+Source, raw-data and oracle hashes remained unchanged. This run1 failed
+acceptance remains retained and is not converted into a pass.
 
 A new diagnostic loader reuses the verified canonical module and checks both
 source copies, the loaded path and function bindings. Nine regression tests
 and 108 checks in the actual staged layout passed without skips; independent
 review found no open P0/P1/P2 within capture preparation. A separate run2 uses
-the same experiment and frozen oracle. Its formal acceptance remains pending.
+the same experiment and frozen oracle. Its completed result follows.
+
+## Scorer formal run2 acceptance
+
+The replacement model run completed all 12 modes and 83 generation cases with
+driver and supervisor exit 0 in 2,606.9 seconds. Archive and individual member
+checks recovered 3,421 original files totaling 7,361,963,004 bytes. The unchanged
+156-file frozen oracle then completed its CPU replay with exit 0 in 1,740.2
+seconds, without timeout or remaining process-group members.
+
+The strict report independently grants Scorer P14/P15/P16 within this pinned
+single-card eager protocol. All 566 acceptance gates passed; issues and changes
+to source, raw data and proof files are empty. It excludes Base and grants
+neither P17 nor P18. The earlier run1 failure remains preserved.
+
+The actual successful formal suites used Base shortening/conservative thresholds
+0.10/0.01 and separate Scorer thresholds 0.50/0.05. These source-specific values
+must not be interchanged or presented as universal production recommendations.
 
 ## Native model save validation
 
@@ -99,6 +118,7 @@ python -X utf8 -B run_p17_r5_base_off_comparison_v1.py status
 python -X utf8 -B run_p17_r5_base_on_comparison_v1.py status
 python -X utf8 -B run_scorer_raw_replay_v2.py status
 python -X utf8 -B run_scorer_formal_r5_run1_comparison_v3.py status
+python -X utf8 -B run_scorer_formal_r5_run2_comparison_v1.py status
 ```
 
 Full reports are identified by workspace-relative paths, sizes and SHA-256
@@ -119,12 +139,21 @@ one 16,384-byte direct asynchronous D2H copy. Its source-bound zero-copy marker
 had zero copies; 26 CPU checks passed without skips. This calibrated marker
 does not establish zero-copy behavior for arbitrary model traces or complete P17.
 
-Scorer still needs its own complete correctness and lifecycle matrix. Its
-independently reviewed full harness passed 257 CPU checks and another 99 checks
-in the actual staged layout, all without skips. Formal model acceptance remains
-pending. Prospective limits require complete logits for every publication, with
-up to two request rows, 512 publications and 16 GiB of full logits per group.
-Exceeding a limit fails capture; it never truncates evidence to claim success.
+Scorer now has its own successful correctness and lifecycle matrix, as
+recorded above. Complete logits were required for every publication, with up to
+two request rows, 512 publications and 16 GiB of full logits per group. Exceeding
+a limit fails capture; it never truncates evidence to claim success.
+
+The real Base default-fixed native off/on pair completed and was recovered,
+but its original strict native comparison failed: zero-duration
+StreamSyncTaskFinish records numbered 24 versus 23. Compute tasks, raw copies
+and the other recorded synchronization call counts matched. Every completion
+point has a synchronization parent; the difference is within the final
+DeviceSynchronize call. Source attribution is still pending. This failure is
+retained and does not grant P17. The remaining Base arms must use the actual
+Base thresholds above; the older unrun packages with Scorer thresholds were
+blocked and replaced before any of those remaining Base pair packages
+was staged or launched.
 
 P18 has not run. Any performance conclusion requires the fixed matched
 workload, cache initial state, warmup, repeated measurements and original

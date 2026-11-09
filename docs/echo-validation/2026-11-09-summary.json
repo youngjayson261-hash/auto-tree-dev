@@ -1,6 +1,6 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T17:03:16.364179+00:00",
+  "recorded_utc": "2026-11-09T18:32:59.154411+00:00",
   "scope": "Archive index and actual results only; original raw archives are stored outside this Git repository.",
   "production_code_commit": "a0f8a105f18136d4db5712d793e1e4cb41f54230",
   "production_code_tree": "ba689af9ee1746884c2d98797dc3a4bb95f618c3",
@@ -139,7 +139,6 @@
     "exact_original_archive_recovered": true
   },
   "pending": [
-    "Scorer full correctness/lifecycle/stop acceptance independent of Base.",
     "Source-bound native operation/synchronization/copy equivalence for actual model traces.",
     "P18 matched workload performance and final delivery evidence."
   ],
@@ -261,12 +260,14 @@
       "bytes": 30306,
       "sha256": "8848fc26566eb8e59b9de51b0e070984a1873e6e781354946d049e96119f45e7"
     },
-    "formal_model_acceptance_pending": true,
+    "formal_model_acceptance_pending": false,
     "P14": false,
     "P15": false,
     "P16": false,
     "P17": false,
-    "P18": false
+    "P18": false,
+    "historical_pre_run_preparation": true,
+    "completed_formal_result": "scorer_r5_formal_run2_passed"
   },
   "scorer_r5_formal_run1_failed": {
     "P14": false,
@@ -364,7 +365,9 @@
       "sha256": "3980e17c00d30e4875e27734c3f0f6d825f4ac88f3868fd1006cd7c530f35abe"
     },
     "replacement_run": "scorer-formal-r5-run2",
-    "replacement_formal_acceptance_pending": true
+    "replacement_formal_acceptance_pending": false,
+    "historical_pre_run_preparation": true,
+    "completed_formal_result": "scorer_r5_formal_run2_passed"
   },
   "p17_model_native_schema_run3": {
     "P14": false,
@@ -409,6 +412,127 @@
     "remaining": [
       "source-bound native attribution and event completeness",
       "actual observer off/on equivalence",
+      "P18 performance"
+    ]
+  },
+  "scorer_r5_formal_run2_passed": {
+    "scope": "Scorer log-probability source only, pinned r5 eager protocol",
+    "model_attempt": "scorer-formal-r5-run2",
+    "modes": 12,
+    "generate_cases": 83,
+    "passed": true,
+    "P14": true,
+    "P15": true,
+    "P16": true,
+    "P17": false,
+    "P18": false,
+    "model_driver_exit": 0,
+    "model_supervisor_exit": 0,
+    "model_elapsed_seconds": 2606.884096622467,
+    "CPU_exit": 0,
+    "CPU_elapsed_seconds": 1740.2049252986908,
+    "CPU_timed_out": false,
+    "cleanup_complete": true,
+    "remaining_live_members": [],
+    "issues": [],
+    "source_changed": [],
+    "raw_changed": [],
+    "proof_changed": [],
+    "raw_files": 3421,
+    "raw_bytes": 7361963004,
+    "archive_bytes": 3808197303,
+    "archive_sha256": "7904abc7bed910ddfa712f21371091f445f3bc2b72da1cf4b7389fee2d5ace8e",
+    "comparison": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-formal-r5-run2-comparison-v1-single-thread-7200/comparison-v3.json",
+      "bytes": 226706,
+      "sha256": "32b13ce1d8c59ad51048d4339fccfd2804ae81be96455335c770e26b675413d1"
+    },
+    "CPU_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-formal-r5-run2-comparison-v1-single-thread-7200/status.json",
+      "bytes": 1643,
+      "sha256": "5f6aec7698707dda27fc8876f94e55e57185f136d1bff71a58615d7d7e4043b5"
+    },
+    "acceptance_record": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-run2-acceptance-v1.json",
+      "bytes": 1264,
+      "sha256": "a285caca5f40db1bbc3acb26e5384b1afe6c3827d13e163acccf006cd47dbd54"
+    },
+    "collection_manifest": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/scorer-formal-r5-run2/collection-manifest.json",
+      "bytes": 640928,
+      "sha256": "8a2e2fc86fe03715234476c9a64eeb5dfb33dfcdba54e20178cd6dc21e3a3a00"
+    },
+    "model_terminal": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-capture-v2/root-status-10.json",
+      "bytes": 103675,
+      "sha256": "6f77184a218a1c23fa55a884caa68ba37adccfcd9ab0f49056f6718e1ad9773f"
+    },
+    "CPU_collection_receipt": {
+      "workspace_relative_path": "results/echo-all-p-20261109/receipts/20261109T182858007793Z-scorer-formal-r5-run2-comparison-single-thread-collect.json",
+      "bytes": 1765233,
+      "sha256": "f784106a6dd5c673d750489b4eef84e21b7b861a09a61030df088bb7452afeec"
+    },
+    "pre_run_oracle": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-oracle-v1/freeze.json",
+      "bytes": 30306,
+      "sha256": "8848fc26566eb8e59b9de51b0e070984a1873e6e781354946d049e96119f45e7"
+    },
+    "no_Base_result_borrowed": true,
+    "run1_failure_retained": true,
+    "independent_result_review_pending": false,
+    "independent_result_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/scorer-formal-run2-independent-result-review-v1.json",
+      "bytes": 1301,
+      "sha256": "a7bfcc4d272f7068bab56049800d6862687364bd46903bb06e15afca2163ccf4"
+    }
+  },
+  "source_specific_formal_thresholds": {
+    "Base_shortening": 0.1,
+    "Base_conservative": 0.01,
+    "Scorer_shortening": 0.5,
+    "Scorer_conservative": 0.05,
+    "Base_experiment": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/p17-r5-off-v3/experiment.json",
+      "bytes": 11377,
+      "sha256": "adaec019315735045fe78450ada1c2f3f9aa09c2cc35b00f83df1a832a4c5214"
+    },
+    "Scorer_experiment": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/scorer-formal-r5-run2/experiment.json",
+      "bytes": 12519,
+      "sha256": "dcdd683fe4e751a9c784985845516c5780b5edc2ee1a5ea00b2d02e03d580c98"
+    },
+    "scope": "values used in separate successful formal suites, not a universal production recommendation"
+  },
+  "p17_default_native_pair_failed": {
+    "scope": "Base default fixed canonical34/128 observed native operations only",
+    "off_exit": 0,
+    "on_exit": 0,
+    "passed": false,
+    "P17": false,
+    "P18": false,
+    "strict_original_failure_retained": true,
+    "StreamSyncTaskFinish_off": 24,
+    "StreamSyncTaskFinish_on": 23,
+    "raw_copy_compute_other_sync_counts_equal": true,
+    "source_attribution_pending": true,
+    "comparison": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-native-model-pairs-v1/default-pair-comparison-v1.json",
+      "bytes": 882617,
+      "sha256": "b16539e7ed6669402e9d52dd80ecd51b32f1aba13021e0934f67c7854afeff6b"
+    },
+    "difference": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-native-model-pairs-v1/default-pair-native-difference-v1.json",
+      "bytes": 615,
+      "sha256": "814527ea1f7b7cf7cdfaf2405f454bbcbf224ac7d239e838602b83fd8d66ecbf"
+    },
+    "point_attribution": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-sync-point-attribution-v1/actual-point-attribution-v1.json",
+      "bytes": 133910,
+      "sha256": "ace52cfa648790155f4ca9664bce2ced8049e90798ccefed4afe3fa5ddc5407d"
+    },
+    "remaining": [
+      "source-bound conditional completion-point semantics",
+      "complete P17 equivalence admission",
       "P18 performance"
     ]
   }
