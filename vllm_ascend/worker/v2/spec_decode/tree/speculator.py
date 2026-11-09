@@ -16,7 +16,13 @@ from vllm_ascend.utils import vllm_version_is
 from vllm_ascend.worker.v2.spec_decode.dflash.speculator import (
     AscendDFlashSpeculator,
 )
-from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import PolicyStatus
+from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import (
+    PolicyStatus,
+    TreeScoreSummary,
+    confidence_source_metadata,
+    select_tree_prefix_device,
+    validate_policy_config,
+)
 from vllm_ascend.worker.v2.spec_decode.tree.builder import (
     create_tree_builder,
 )
@@ -70,6 +76,62 @@ def _gid_for_swa_prefix(prefix: str, groups) -> int | None:
     return member
 
 
+class _TreeBudgetRuntime:
+    """Persistent buffers indexed by the current batch, never by stale slot identity."""
+
+    def __init__(self, capacity: int, max_depth: int, device: torch.device, *, tau: float):
+        validate_policy_config("confidence", tau)
+        if type(capacity) is not int or capacity < 1 or type(max_depth) is not int or max_depth < 1:
+            raise ValueError("invalid tree budget runtime capacity")
+        self.capacity = capacity
+        self.tau = tau
+        self._batch_rows = None
+        self._summary = None
+        self._summary_views = {}
+        self.bootstrap_mask = None
+        if tau > 0:
+            self._summary = TreeScoreSummary(
+                torch.empty((capacity, max_depth), dtype=torch.float32, device=device),
+                torch.empty((capacity, max_depth), dtype=torch.bool, device=device),
+                torch.empty((capacity,), dtype=torch.bool, device=device),
+            )
+            self.bootstrap_mask = torch.ones((capacity,), dtype=torch.bool, device=device)
+
+    def _check_rows(self, num_reqs: int) -> None:
+        if type(num_reqs) is not int or not 0 <= num_reqs <= self.capacity:
+            raise ValueError("invalid active tree request count")
+
+    def score_summary(self, num_reqs: int) -> TreeScoreSummary | None:
+        self._check_rows(num_reqs)
+        if self._summary is None:
+            return None
+        if num_reqs not in self._summary_views:
+            self._summary_views[num_reqs] = TreeScoreSummary(*(value[:num_reqs] for value in self._summary))
+        return self._summary_views[num_reqs]
+
+    def update_batch(self, is_prefilling_np, num_reqs: int) -> None:
+        self._check_rows(num_reqs)
+        if self.bootstrap_mask is not None:
+            source = torch.from_numpy(is_prefilling_np)
+            if source.ndim != 1 or source.shape[0] < num_reqs or source.dtype != torch.bool:
+                raise ValueError("bootstrap phases must be bool rows of the current batch")
+            self.bootstrap_mask[:num_reqs].copy_(source[:num_reqs], non_blocking=True)
+        self._batch_rows = num_reqs
+
+    def publish(self, layout, packet_out: torch.Tensor) -> None:
+        if packet_out.ndim != 2 or packet_out.shape != (self._batch_rows, 2):
+            raise ValueError("tree packet must match the current active batch")
+        if packet_out.stride() != (2, 1):
+            raise ValueError("runtime tree packet must preserve row stride 2 and column stride 1")
+        select_tree_prefix_device(
+            layout,
+            self.score_summary(packet_out.shape[0]),
+            packet_out,
+            tau=self.tau,
+            bootstrap_mask=self.bootstrap_mask,
+        )
+
+
 class AscendTreeSpeculator(AscendDFlashSpeculator):
     """Parallel-draft tree host (DFlash or DSpark draft) + topology builder.
 
@@ -110,6 +172,9 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
 
         tree_cfg = get_ascend_config().tree_spec_config
         self._tree_budget_enabled = tree_cfg.confidence_verification_enabled
+        self._tree_confidence_requested = tree_cfg.confidence_verification_requested
+        self._tree_confidence_source = tree_cfg.verification_confidence_source
+        self._tree_budget_runtime = None
         self.budget = tree_cfg.budget
         self.topk = tree_cfg.topk
         self.candidate_size = tree_cfg.candidate_size
@@ -261,6 +326,13 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         self._tree_graphs: dict[int, Any] = {}
         if self._tree_budget_enabled:
             self.tree_budget_packet = torch.empty((self.max_num_reqs, 2), dtype=torch.int32, device=device)
+            if self._tree_budget_enabled:
+                self._tree_budget_runtime = _TreeBudgetRuntime(
+                    self.max_num_reqs,
+                    self.num_speculative_steps,
+                    device,
+                    tau=tree_cfg.verification_threshold,
+                )
 
     def packed_dsv4_verify(self) -> bool:
         """Packed ori + skip-C4 target verify (DSV4 DSpark, topk>1)."""
@@ -476,6 +548,23 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             depth_penalty=self.depth_penalty,
             keep_origin_chain=self.keep_origin_chain,
         )
+        if self._tree_budget_enabled:
+            tree_vocab_size = (
+                model.config.draft_vocab_size
+                if self.draft_backend == "dspark" and not self._dsv4_dspark_draft
+                else self.vocab_size
+            )
+            scorer = self.tree_builder.scorer
+            self._tree_confidence_metadata = confidence_source_metadata(
+                source=self._tree_confidence_source,
+                scorer_name=scorer.name,
+                candidate_size=getattr(scorer, "candidate_size", None),
+                prefix_len=getattr(scorer, "prefix_len", 0),
+                width=self.tree_builder._frontier_width(tree_vocab_size),
+                vocab_size=tree_vocab_size,
+                threshold=get_ascend_config().tree_spec_config.verification_threshold,
+            )
+            logger.info("Tree verification confidence: %s", self._tree_confidence_metadata)
         logger.info(
             "Tree correction heads: markov=%s domino=%s prefix_len=%s shift_label=%s",
             draft_model is not None,
@@ -643,9 +732,11 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 self.tree_graph_stats.record_lookup("draft", self._draft_graph_used)
                 if self._draft_graph_used:
                     self.tree_graph_stats.record_replay("draft")
+                if self._tree_budget_runtime is not None:
+                    self._tree_budget_runtime.update_batch(input_batch.is_prefilling_np, input_batch.num_reqs)
                 self._finalize_tree(input_batch.num_reqs)
                 if self._tree_budget_enabled:
-                    self._write_fixed_tree_budget()
+                    self._publish_tree_budget()
                 if self._dsv4_dspark_draft and self.topk == 1:
                     # Storage capacity is the tree budget; the chain has only K
                     # draft tokens. Never publish the padded suffix to the runner.
@@ -768,13 +859,34 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         layout = self._load_layout_from_buffers(num_reqs)
         nqp = self.num_query_per_req
         root_token_ids = self.input_buffers.input_ids[: num_reqs * nqp].view(num_reqs, nqp)[:, 0]
-        self.tree = self.tree_builder.build(
-            logits,
-            layout,
-            root_token_ids=root_token_ids,
-            draft_hidden=draft_hidden,
-            draft_candidate_ids=draft_candidate_ids,
-        )
+        summary = None
+        if self._tree_budget_runtime is not None:
+            summary = self._tree_budget_runtime.score_summary(num_reqs)
+        if summary is None:
+            self.tree = self.tree_builder.build(
+                logits,
+                layout,
+                root_token_ids=root_token_ids,
+                draft_hidden=draft_hidden,
+                draft_candidate_ids=draft_candidate_ids,
+            )
+        else:
+            self.tree = self.tree_builder.build(
+                logits,
+                layout,
+                root_token_ids=root_token_ids,
+                draft_hidden=draft_hidden,
+                draft_candidate_ids=draft_candidate_ids,
+                score_summary=summary,
+                full_vocab_size=self._tree_full_vocab_size,
+                verification_confidence_source=getattr(self, "_tree_confidence_source", "base_full_vocab"),
+            )
+
+    def _publish_tree_budget(self) -> None:
+        if self._tree_budget_runtime is None:
+            self._write_fixed_tree_budget()
+        else:
+            self._tree_budget_runtime.publish(self.tree, self.tree_budget_packet[: self.input_batch.num_reqs])
 
     def _write_fixed_tree_budget(self) -> None:
         packet = self.tree_budget_packet[: self.input_batch.num_reqs]
@@ -811,6 +923,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             tree_vocab_size,
             self.num_speculative_steps,
             self.device,
+            reserve_base_confidence=self._tree_budget_runtime is not None,
         )
         self.tree_graph_stats.set_workspace_bytes(
             "tree", "shared", self.tree_graph_stats.tensor_bytes(self.tree_builder.workspace_tensors())

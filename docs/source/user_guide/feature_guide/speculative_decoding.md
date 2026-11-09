@@ -698,6 +698,22 @@ Key configuration parameters:
 
 5. **`shared_storage_path`**: Directory where hidden states will be saved as `.safetensors` files (one per request).
 
+## Tree confidence verification (Model Runner V2) {: #tree-confidence-verification-v2 }
+
+Model Runner V2 tree speculation can select a verification prefix from an already
+constructed draft tree through `additional_config.tree_spec_config`. Its
+`verification_confidence_source` defaults to `"base_full_vocab"`; an explicit
+`"scorer_logprob"` reuses the normalized edge scores of an admitted scorer.
+Domino uses the base full-vocabulary distribution before `prefix_len` and its
+corrected Top-C proposal distribution afterwards. Thresholds need separate
+calibration for each source and must be revalidated when C or scoring changes.
+
+See [Tree configuration](../configuration/additional_config.md#tree_spec_config)
+for the explicit JSON example, candidate-size rule and current synchronous eager
+TP1/PP1/DP1/PCP1/DCP1 runtime admission without multi-rank fine-grained TP.
+This V2 tree-prefix policy has its own configuration;
+the v1 `dynamic_spec_config` methods below are separate features.
+
 ## Dynamic Speculative Decoding {: #dynamic-speculative-decoding }
 
 Dynamic Speculative Decoding adapts the number of draft tokens (K) at runtime, instead of always using a fixed `num_speculative_tokens`. This helps keep speculative decoding beneficial as concurrency and draft confidence change. vLLM Ascend currently provides two approaches:

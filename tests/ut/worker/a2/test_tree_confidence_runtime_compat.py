@@ -58,6 +58,7 @@ class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
         self.model.logits_processor = SimpleNamespace(vocab_size=8, org_vocab_size=8)
         self.runner = SimpleNamespace(
             _tree_budget_enabled=True,
+            _tree_confidence_requested=True,
             speculator=SimpleNamespace(
                 model=self.model,
                 tree_builder=SimpleNamespace(scorer=IndependentScorer()),
@@ -159,9 +160,17 @@ class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "scorer rejected"):
             self.validate(self.runner)
 
-    def test_disabled_budget_skips_admission(self):
+    def test_disabled_confidence_skips_admission(self):
+        self.runner._tree_budget_enabled = False
+        self.runner._tree_confidence_requested = False
+        self.runner.speculator.model = SimpleNamespace()
+        self.validate(self.runner)
+        self.assertIsNone(self.facts)
+
+    def test_tau_zero_confidence_skips_admission(self):
         self.runner._tree_budget_enabled = False
         self.runner.speculator.model = SimpleNamespace()
+        self.assertTrue(self.runner._tree_confidence_requested)
         self.validate(self.runner)
         self.assertIsNone(self.facts)
 

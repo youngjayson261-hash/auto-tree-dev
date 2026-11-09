@@ -107,16 +107,19 @@ class TestConfidenceParallelAdmission(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "finegrained_tp"):
                     self.validate(self.runner)
 
-    def test_disabled_budget_does_not_read_any_new_metadata(self):
+    def test_disabled_and_tau_zero_do_not_read_any_new_metadata(self):
         class Forbidden:
             def __getattribute__(self, name):
                 raise AssertionError("disabled confidence read parallel metadata")
 
-        self.runner._tree_budget_enabled = False
-        self.runner.vllm_config = Forbidden()
-        self.runner.ascend_config = Forbidden()
-        self.validate(self.runner)
-        self.assertIsNone(self.facts)
+        for requested in (False, True):
+            with self.subTest(requested=requested):
+                self.runner._tree_budget_enabled = False
+                self.runner._tree_confidence_requested = requested
+                self.runner.vllm_config = Forbidden()
+                self.runner.ascend_config = Forbidden()
+                self.validate(self.runner)
+                self.assertIsNone(self.facts)
 
 
 if __name__ == "__main__":

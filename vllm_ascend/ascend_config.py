@@ -540,7 +540,10 @@ class AscendConfig:
                 "topk": null,
                 "candidate_size": 64,
                 "depth_penalty": null,
-                "keep_origin_chain": false
+                "keep_origin_chain": false,
+                "verification_policy": "fixed",
+                "verification_threshold": 0.0,
+                "verification_confidence_source": "base_full_vocab"
             },
             "sparse_kv_offload_config": {
                 "enabled": false,
@@ -1326,6 +1329,10 @@ class TreeSpecConfig:
     overrides that scorer default for every backend.
     ``keep_origin_chain`` preserves the draft model's per-step argmax chain
     during global budget pruning.
+    ``verification_confidence_source`` selects full-vocabulary base logp
+    (the compatible default) or the admitted scorer's existing edge logp.
+    Domino's scorer_logprob source uses base logp before prefix_len and its
+    Top-C corrected distribution afterwards; thresholds need separate tuning.
     Draft depth remains speculative_config.num_speculative_tokens.
     """
 
@@ -1337,6 +1344,11 @@ class TreeSpecConfig:
     keep_origin_chain: bool = False
     verification_policy: str = "fixed"
     verification_threshold: float = 0.0
+    verification_confidence_source: str = "base_full_vocab"
+
+    @property
+    def confidence_verification_requested(self) -> bool:
+        return self.enabled and self.verification_policy == "confidence"
 
     @property
     def confidence_verification_enabled(self) -> bool:
@@ -1357,6 +1369,8 @@ class TreeSpecConfig:
 
     @model_validator(mode="after")
     def _validate(self):
+        if self.verification_confidence_source not in ("base_full_vocab", "scorer_logprob"):
+            raise ValueError("verification_confidence_source must be base_full_vocab or scorer_logprob")
         if self.enabled and (self.budget is None or self.topk is None):
             raise ValueError("tree_spec_config.budget and topk are required when enabled")
         if self.budget is not None and (self.budget < 0 or (self.enabled and self.budget == 0)):

@@ -198,7 +198,7 @@ class TestDominoConfidence(unittest.TestCase):
         logits, roots, hidden = self.inputs()
         scorer = scoring.DominoScorer(SmallCorrection(), candidate_size=4)
         builder = builder_module.TreeBuilder(5, 2, scorer)
-        builder.prepare_for_capture(2, 6, 3, torch.device("cpu"))
+        builder.prepare_for_capture(2, 6, 3, torch.device("cpu"), reserve_base_confidence=True)
         pointers = [tensor.data_ptr() for tensor in builder.workspace_tensors()]
         for _ in range(2):
             builder.build(

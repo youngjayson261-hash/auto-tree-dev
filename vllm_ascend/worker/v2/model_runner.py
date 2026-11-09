@@ -154,6 +154,7 @@ class NPUModelRunner(GPUModelRunner):
         # Ascend-specific configurations
         self.ascend_config = get_ascend_config()
         self._tree_budget_enabled = self.ascend_config.tree_spec_config.confidence_verification_enabled
+        self._tree_confidence_requested = self.ascend_config.tree_spec_config.confidence_verification_requested
         self.sparse_kv_offload_manager = None
         self.kvpp = KVPPRuntime()
         # Adaptive verification uses this flag to apply FIA-specific query
@@ -402,9 +403,21 @@ class NPUModelRunner(GPUModelRunner):
             and model.logits_processor.vocab_size == expected_vocab
             and model.logits_processor.org_vocab_size == expected_vocab
         )
-        admitted = admit_base_confidence_scorer(
-            type(speculator.tree_builder.scorer), IndependentScorer, DominoScorer, bool(full_vocab)
-        )
+        confidence_source = getattr(speculator, "_tree_confidence_source", "base_full_vocab")
+        if confidence_source == "base_full_vocab":
+            admitted = admit_base_confidence_scorer(
+                type(speculator.tree_builder.scorer), IndependentScorer, DominoScorer, bool(full_vocab)
+            )
+        else:
+            from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import admit_verification_confidence_scorer
+
+            admitted = admit_verification_confidence_scorer(
+                type(speculator.tree_builder.scorer),
+                IndependentScorer,
+                DominoScorer,
+                bool(full_vocab),
+                confidence_source,
+            )
         processors_supported = (
             tuple(type(p) for p in self.sampler.logits_processors) == (LogitBiasState, PenaltiesState, BadWordsState)
             and not self.sampler.thinking_budget_state.enabled
