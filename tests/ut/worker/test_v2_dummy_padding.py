@@ -50,7 +50,9 @@ def runner(buffers):
 def _make_graph_manager(buffers, mode, uniform, capture_size):
     manager = ModelAclGraphManager.__new__(ModelAclGraphManager)
     manager.vllm_config = SimpleNamespace(
-        speculative_config=None, cache_config=SimpleNamespace(use_kda_recoverssm=False)
+        speculative_config=None,
+        cache_config=SimpleNamespace(use_kda_recoverssm=False),
+        additional_config={},
     )
     manager.compilation_config = SimpleNamespace(cudagraph_capture_sizes=[capture_size], max_cudagraph_capture_size=64)
     manager.cudagraph_mode = mode

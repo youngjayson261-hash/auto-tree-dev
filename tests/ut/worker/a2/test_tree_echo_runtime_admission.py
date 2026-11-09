@@ -39,7 +39,9 @@ def make_runner(config):
     model = AscendDominoQwen3ForCausalLM.__new__(AscendDominoQwen3ForCausalLM)
     torch.nn.Module.__init__(model)
     model.config = config.speculative_config.draft_model_config.hf_config
-    model.draft_vocab_size = model.config.vocab_size
+    # Match DFlashQwen3ForCausalLM.__init__ without loading weights.
+    if getattr(model.config, "draft_vocab_size", None) is None:
+        model.config.draft_vocab_size = model.config.vocab_size
     model.draft_id_to_target_id = None
     with set_current_vllm_config(config):
         model.logits_processor = LogitsProcessor(model.config.vocab_size)
