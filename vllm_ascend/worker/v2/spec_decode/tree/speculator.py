@@ -12,6 +12,7 @@ from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.worker.v2.spec_decode.dflash.speculator import (
     AscendDFlashSpeculator,
 )
+from vllm_ascend.worker.v2.spec_decode.tree.budget_metrics import TreeBudgetStats
 from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import (
     PolicyStatus,
     TreeScoreSummary,
@@ -180,6 +181,23 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
 
         self.tree_shape = TreeShape(self.num_speculative_steps, self.budget, self.topk)
         self.tree_graph_stats = TreeGraphStats()
+        # DSV4 DSpark draft support is not ported to this rebase; Qwen paths only.
+        self._dsv4_dspark_draft = False
+        self.tree_budget_stats = TreeBudgetStats()
+        if self._dsv4_dspark_draft and self.topk > 1:
+            if not vllm_config.model_config.enforce_eager:
+                if vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.FULL:
+                    raise ValueError("DSV4 tree graph execution requires FULL mode")
+            parallel = vllm_config.parallel_config
+            for name in (
+                "pipeline_parallel_size",
+                "prefill_context_parallel_size",
+                "decode_context_parallel_size",
+            ):
+                if int(getattr(parallel, name, 1)) != 1:
+                    raise ValueError(f"This V4 tree patch requires {name}=1")
+            if getattr(vllm_config, "kv_transfer_config", None) is not None:
+                raise ValueError("Tree branch commitment is not integrated with KV transfer")
 
         self.tree_builder = None
         self._domino_scorer = None
@@ -464,6 +482,8 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             if self._tree_budget_runtime is not None:
                 self._tree_budget_runtime.update_batch(input_batch.is_prefilling_np, input_batch.num_reqs)
             self._finalize_tree(input_batch.num_reqs)
+            if self.tree_builder is not None and self.tree_budget_stats.enabled:
+                self.tree_budget_stats.record_builder_produced(self.tree_builder, input_batch.num_reqs)
             if self._tree_budget_enabled:
                 self._publish_tree_budget()
             if self.tree_builder is not None:

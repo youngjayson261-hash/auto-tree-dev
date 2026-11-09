@@ -36,6 +36,7 @@ from vllm.sequence import IntermediateTensors
 from vllm.utils.torch_utils import async_tensor_h2d as async_copy_to_gpu
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
+from vllm.v1.outputs import AsyncModelRunnerOutput
 from vllm.v1.worker.dp_utils import skip_dp_coordination
 from vllm.v1.worker.gpu import model_runner as vllm_model_runner
 from vllm.v1.worker.gpu.cudagraph_utils import BatchExecutionDescriptor
@@ -131,6 +132,8 @@ from vllm_ascend.worker.v2.kvpp import KVPPRuntime
 from vllm_ascend.worker.v2.pcp_manager import AscendPCPManager
 from vllm_ascend.worker.v2.pp_transport import resolve_spec_pp_support
 from vllm_ascend.worker.v2.spec_decode import dflash_tree_spec_enabled, init_speculator, tree_target_query_len
+from vllm_ascend.worker.v2.spec_decode.eagle.speculator import AscendEagleSpeculator
+from vllm_ascend.worker.v2.spec_decode.tree.budget_output import TreeBudgetOutput
 from vllm_ascend.worker.v2.spec_decode.tree.draft_tokens import TreeDraftTokensHandler
 from vllm_ascend.worker.v2.spec_decode.tree.shape import TreeShape
 from vllm_ascend.worker.v2.spec_decode.tree.speculator import AscendTreeSpeculator
@@ -282,6 +285,7 @@ class NPUModelRunner(GPUModelRunner):
                     self.speculator,
                     verification_policy=self.ascend_config.tree_spec_config.verification_policy,
                     threshold=self.ascend_config.tree_spec_config.verification_threshold,
+                    budget_stats=self.speculator.tree_budget_stats,
                 )
         # AscendInputBuffers has extra `seq_lens_cpu` attribute.
         # so reinitialize input_buffers here.
@@ -584,6 +588,26 @@ class NPUModelRunner(GPUModelRunner):
                 "prompt logprobs and fixed-token prompt scoring are not supported with lmhead TP."
             )
 
+        pcp_manager = self.pcp_manager
+        if pcp_manager is not None and not self.is_last_pp_rank and self.execute_model_state is not None:
+            assert isinstance(pcp_manager, AscendPCPManager)
+            # The last PP stage restores PCP outputs to the global request
+            # layout before sampling. Non-last stages do not own final hidden
+            # states, but their PP receive/postprocess path must use that same
+            # global request layout rather than PCP-local segment rows.
+            self.execute_model_state = self.execute_model_state._replace(
+                input_batch=pcp_manager.global_batch,
+            )
+
+        # The pre-restore marker is scoped to this sampling step; stale state
+        # from a previous step must not suppress the upstream all-gather.
+        if pcp_manager is not None and isinstance(pcp_manager, AscendPCPManager):
+            pcp_manager._sampling_hidden_restored = False
+        self._restore_replicated_draft_target_states()
+        budget_stats = getattr(self.speculator, "tree_budget_stats", None)
+        budget_cohort = None
+        if budget_stats is not None and budget_stats.enabled:
+            budget_cohort = budget_stats.capture_consumption(self.execute_model_state)
         state = self.execute_model_state
         self._lmhead_pad_size = self._get_lmhead_pad_size(state) if state is not None and lmhead_tp_enable() else None
         output = super().sample_tokens(grammar_output)
@@ -601,8 +625,20 @@ class NPUModelRunner(GPUModelRunner):
             self.draft_tokens_handler.seal_budget_production()
         # Close the per-step msprobe dump cycle on the normal last-PP-rank
         # path (v1 parity: v1 finalizes at the end of sample_tokens).
+        if budget_cohort is not None:
+            if isinstance(output, AsyncModelRunnerOutput):
+                output = TreeBudgetOutput(output, budget_stats, budget_cohort)
+            elif output is not None:
+                budget_stats.record_host_output(budget_cohort, output)
         self._finalize_dump_data()
         return output
+
+    def _remove_request(self, req_id):
+        result = super()._remove_request(req_id)
+        stats = getattr(getattr(self, "speculator", None), "tree_budget_stats", None)
+        if stats is not None and stats.enabled:
+            stats.discard(req_id)
+        return result
 
     def pool(self):
         output = super().pool()

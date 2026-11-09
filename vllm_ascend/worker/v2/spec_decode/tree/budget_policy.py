@@ -350,3 +350,15 @@ def select_tree_prefix_device(
     status = torch.where(bad_layout, int(PolicyStatus.LAYOUT_ERROR), status)
     packet_out[:, 0].copy_(a)
     packet_out[:, 1].copy_(status)
+
+
+def summarize_budget_counts(rows):
+    """Sum non-root S/A/V/raw-accepted counts from one matched cohort."""
+    totals = [0, 0, 0, 0]
+    for s, a, v, accepted in rows:
+        validate_tree_counts(s, a, v, s)
+        if type(accepted) is not int or not 0 <= accepted <= v:
+            raise ValueError("accepted must satisfy 0 <= accepted <= V")
+        for index, value in enumerate((s, a, v, accepted)):
+            totals[index] += value
+    return dict(zip(("draft_non_root", "published_non_root", "verified_non_root", "accepted_non_root"), totals))
