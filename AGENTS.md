@@ -1,5 +1,14 @@
 # vLLM Ascend Development Guidelines
 
+## ECHO 提交范围约束（用户明确要求，2026-11-09）
+
+- **无关 CI 清理不得重新混入 ECHO**。此约束跨对话持续有效，适用于 ECHO 分支、提交和 PR，优先于下文通用的格式化结果纳入建议。
+- 历史清理 `50f2dfa2`（`chore: repair inherited CI checks and formatting`）已由 `7cf26bc1` 按用户要求回退。`29522800`（`chore: restore repository CI checks`）误将同类清理重新带入，已由 `6277cf5d` 精确回退；不得再次套用这些已回退的清理补丁。
+- 不得借“恢复 CI”加入无关的全仓格式化、日志器替换、导入清理或重排、`noqa` 豁免、全局拼写白名单、C++ 命名修改等；另起清理提交也不代表获准混入 ECHO。
+- 当前功能引入的问题应定向修复，局部格式遵循仓库要求。若认为必须重新纳入已回退清理，须先列出具体文件、行为影响和必要性，取得用户明确授权；CI 报错本身不构成授权。
+- 功能验证与继承 CI 失败分开记录。全量格式检查在隔离副本执行，不直接写回自动修复结果；如实报告当前版本的失败，不复用历史通过结论。
+- 每次提交前检查 Git 历史、暂存区和最终差异，保留用户未提交改动，仅暂存本次范围内的文件或补丁。CI 通常不妨碍本地提交；远端必需检查可能阻止 PR 合并，不能据此擅自扩大修改范围。
+
 This document provides instructions for contributors to the vLLM Ascend project. Please read and follow these guidelines to ensure code quality, maintainability, and consistency.
 
 Read linked documentation when it applies to the current task, using the relevant sections. Continue authorized local implementation and validation while preparing the evidence needed for PR review.
@@ -238,7 +247,7 @@ Before pushing, run the required checks for all file types, including Markdown:
 bash format.sh ci
 ```
 
-Inspect any formatter changes and include them in the commit. Push to your fork and create the PR against the upstream repository, following the commit and PR requirements above.
+Inspect formatter changes and include only those within the authorized task scope. For ECHO, follow the scope constraints at the top of this file and record inherited CI failures separately. Push to your fork and create the PR against the upstream repository, following the commit and PR requirements above.
 
 ---
 
