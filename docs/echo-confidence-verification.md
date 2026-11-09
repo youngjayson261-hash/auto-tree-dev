@@ -13,12 +13,14 @@ single-card, greedy protocol.
 | --- | --- | --- |
 | Base a5 on production code `a0f8a105` | P14/P15/P16 passed; issues empty | Base full-vocabulary correctness only |
 | Base r5 off12 candidate | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Same-source candidate with observation disabled |
+| Base r5 on12 candidate | 12 modes, 83 cases; P14/P15/P16 passed; issues empty | Same-source candidate with observation enabled |
+| Base r5 paired replay | Logical counters and paired semantics passed | Native model profiling remains required |
 | Scorer r5 run2 | Strict probability calibration passed; issues empty | Calibration only; formal threshold remains unselected |
 
-Both Base acceptance replays checked the original tensors and lifecycle/stop
+All three Base acceptance replays checked the original tensors and lifecycle/stop
 proofs. Their source, raw data and proof files remained unchanged. The a5 archive
-contains 3,212 verified files. The candidate off12 archive contains 3,398.
-Neither Base result grants correctness to the Scorer confidence source.
+contains 3,212 verified files. Each candidate off12/on12 archive contains 3,398.
+No Base result grants correctness to the Scorer confidence source.
 
 The isolated r5 candidate has 4,728 source files and manifest
 `69f6200fcdf899a775977d26440abae7bde5741b7aa7e7d24b2253cea747d28b`.
@@ -60,6 +62,7 @@ never start another model:
 
 ```text
 python -X utf8 -B run_p17_r5_base_off_comparison_v1.py status
+python -X utf8 -B run_p17_r5_base_on_comparison_v1.py status
 python -X utf8 -B run_scorer_raw_replay_v2.py status
 ```
 
@@ -71,14 +74,22 @@ files were preserved; recovered archives passed exact SHA and member checks.
 
 ## Remaining P17 and P18 gates
 
-The Base on12 counterpart must pass the same correctness comparator and the
-paired metric/semantic checks. Native profiling must separately establish
-operation, synchronization and D2H equivalence on actual model traces.
-Tiny profiler controls and CPU metric tests do not grant that result.
+The Base off12 and on12 counterparts passed the same correctness comparator.
+The paired replay reports matching outputs, native state semantics and counters
+across all 83 cases. Native profiling must still establish operation,
+synchronization and D2H equivalence on actual model traces.
+
+The v5 tiny calibration identified one 16,384-byte synchronous D2H copy and
+one 16,384-byte direct asynchronous D2H copy. Its source-bound zero-copy marker
+had zero copies; 26 CPU checks passed without skips. This calibrated marker
+does not establish zero-copy behavior for arbitrary model traces or complete P17.
 
 Scorer still needs its own complete correctness and lifecycle matrix. Its
-single-request calibration capture limits cannot be reused to truncate
-long or multiple-request formal acceptance runs.
+independently reviewed full harness passed 257 CPU checks and another 99 checks
+in the actual staged layout, all without skips. Formal model acceptance remains
+pending. Prospective limits require complete logits for every publication, with
+up to two request rows, 512 publications and 16 GiB of full logits per group.
+Exceeding a limit fails capture; it never truncates evidence to claim success.
 
 P18 has not run. Any performance conclusion requires the fixed matched
 workload, cache initial state, warmup, repeated measurements and original
