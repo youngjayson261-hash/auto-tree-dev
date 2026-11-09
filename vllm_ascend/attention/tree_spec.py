@@ -40,6 +40,42 @@ def tree_query_len() -> int | None:
         return None
 
 
+def tree_decode_query_lens(
+    cumulative_query_lens: list[int], num_decodes: int, num_tokens: int, capacity: int
+) -> list[int] | None:
+    """Validate real request boundaries; capacity does not imply scheduled rows."""
+    if num_decodes <= 0 or len(cumulative_query_lens) < num_decodes:
+        return None
+    query_lens = []
+    previous = 0
+    for end in cumulative_query_lens[:num_decodes]:
+        query_len = end - previous
+        if not 0 < query_len <= capacity:
+            return None
+        query_lens.append(query_len)
+        previous = end
+    return query_lens if previous == num_tokens else None
+
+
+def pack_tree_queries(query: torch.Tensor, query_lens: list[int], capacity: int) -> torch.Tensor:
+    """Pad only queries for BSND; KV storage and token positions stay unchanged."""
+    if all(query_len == capacity for query_len in query_lens):
+        return query[: sum(query_lens)].view(len(query_lens), capacity, *query.shape[1:])
+    packed = query.new_zeros((len(query_lens), capacity, *query.shape[1:]))
+    start = 0
+    for i, query_len in enumerate(query_lens):
+        packed[i, :query_len].copy_(query[start : start + query_len])
+        start += query_len
+    return packed
+
+
+def unpack_tree_queries(output: torch.Tensor, query_lens: list[int]) -> torch.Tensor:
+    """Restore TND request order without exposing padded query rows."""
+    if all(query_len == output.shape[1] for query_len in query_lens):
+        return output.reshape(sum(query_lens), *output.shape[2:])
+    return torch.cat([output[i, :query_len] for i, query_len in enumerate(query_lens)], dim=0)
+
+
 def tree_decode_threshold(vllm_config: VllmConfig | None = None) -> int:
     """Target decode capacity; DSV4 topk=1 retains its K+1 chain width."""
     if vllm_config is not None:

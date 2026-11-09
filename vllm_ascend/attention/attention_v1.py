@@ -53,9 +53,12 @@ from vllm_ascend.attention.context_parallel.common_cp import (
 )
 from vllm_ascend.attention.tree_spec import (
     GqaTreeSpecAdapter,
+    pack_tree_queries,
+    tree_decode_query_lens,
     tree_decode_threshold,
     tree_spec_enabled,
     tree_treat_short_extends_as_decodes,
+    unpack_tree_queries,
 )
 from vllm_ascend.attention.utils import (
     AscendCommonAttentionMetadata,
@@ -397,6 +400,11 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             num_decode=num_decodes,
             num_tokens=common_attn_metadata.num_actual_tokens,
             for_capture=common_attn_metadata.for_cudagraph_capture,
+            query_lens=(
+                None
+                if common_attn_metadata.for_cudagraph_capture
+                else (query_start_loc_cpu[1 : num_decodes + 1] - query_start_loc_cpu[:num_decodes]).tolist()
+            ),
         )
 
         # TODO: Yet another unnecessary H2D while we already have a query_start_loc on device
@@ -862,8 +870,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
     @staticmethod
     def _tnd_sparse34_mask(attn_mask: torch.Tensor | None, device: torch.device):
-        """TND sparse 3/4 is splitfuse; 4D tree mask (Q!=2048) is invalid there."""
+        """A tree mask cannot be replaced with causal splitfuse semantics."""
         if attn_mask is not None and attn_mask.ndim == 4 and attn_mask.shape[-2] != 2048:
+            if tree_spec_enabled() and not _EXTRA_CTX.is_draft_model:
+                raise RuntimeError("Tree attention requires BSND custom-mask dispatch; TND causal fallback is invalid")
             return AttentionMaskBuilder(device).get_splitfuse_attn_mask()
         return attn_mask
 
@@ -885,10 +895,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
     @staticmethod
     def _tree_fia_bsnd_shape(num_tokens: int, num_decodes: int) -> tuple[int, int] | None:
-        """BSND only when tokens are ``k * (1+budget)`` matching ``num_decodes``.
+        """Uniform capacity gears supported by the existing BSND graph path.
 
-        Other capture gears keep TND + 2D splitfuse; a 4D tree mask with
-        sparse 3 is invalid.
+        Real ragged tree decode uses padded BSND in eager execution and
+        explicitly rejects graph capture. Non-tree gears keep TND dispatch.
         """
         bsnd = tree_fia_bsnd_shape(num_tokens)
         if bsnd is None:
@@ -910,7 +920,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
             and attn_metadata.num_decodes > 0
             and attn_metadata.block_tables is not None
             and attn_metadata.attn_state != AscendAttentionState.PrefillNoCache
-            and self._tree_fia_bsnd_shape(num_tokens, attn_metadata.num_decodes) is not None
+            and tree_decode_query_lens(
+                attn_metadata.actual_seq_lengths_q,
+                attn_metadata.num_decodes,
+                num_tokens,
+                mask.shape[-2],
+            )
+            is not None
         )
 
     def full_graph_tree_fia(
@@ -926,7 +942,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         bsnd = self._tree_fia_bsnd_shape(num_tokens, attn_metadata.num_decodes)
         if bsnd is None:
-            return self.full_graph_fia(query, key, value, attn_metadata, output)
+            raise RuntimeError("Ragged tree decode requires eager execution; ragged graph capture is unsupported")
         num_decodes, q_len = bsnd
         fia_query = query[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
         fia_output = output[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
@@ -1332,22 +1348,15 @@ class AscendAttentionBackendImpl(AttentionImpl):
         TND + sparse_mode=1 does not honor batched custom masks (FIA TND only
         documents sparse 0/3). DCP spec decode uses BSND for the same reason.
         """
-        bsnd = self._tree_fia_bsnd_shape(num_tokens, num_decodes)
-        use_bsnd = block_table is not None and bsnd is not None
-        if use_bsnd:
-            num_decodes, q_len = bsnd
-            fia_query = query[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
-            input_layout = "BSND"
-            actual_seq_q = [q_len] * num_decodes
-            sparse_mode = 0
-        else:
-            fia_query = query[:num_tokens]
-            input_layout = "TND"
-            actual_seq_q = attn_metadata.actual_seq_lengths_q[:num_decodes]
-            q_len = None
-            # TND + custom mask is splitfuse; FIA requires sparse 3/4.
-            sparse_mode = 3
-            attn_mask = AttentionMaskBuilder(fia_query.device).get_splitfuse_attn_mask()
+        q_len = attn_metadata.attn_mask.shape[-2]
+        actual_seq_q = tree_decode_query_lens(attn_metadata.actual_seq_lengths_q, num_decodes, num_tokens, q_len)
+        if block_table is None or actual_seq_q is None:
+            raise RuntimeError("Tree decode requires valid request query boundaries and paged KV tables")
+        fia_query = pack_tree_queries(
+            query[:num_tokens].view(num_tokens, self.num_heads, self.head_size), actual_seq_q, q_len
+        )
+        input_layout = "BSND"
+        sparse_mode = 0
         if isinstance(actual_seq_lengths_kv, torch.Tensor):
             kv_lens = actual_seq_lengths_kv[:num_decodes].tolist()
         else:
@@ -1363,12 +1372,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
             gather_tree_cache_rows(value, page_indices, dense_value)
             key, value = dense_key, dense_value
             bt = torch.arange(bt.numel(), dtype=bt.dtype, device=bt.device).view_as(bt)
-        if use_bsnd:
-            attn_mask = self._bsnd_tree_attn_mask(
-                attn_metadata.attn_mask,
-                num_decodes,
-                q_len,
-            )
+        attn_mask = self._bsnd_tree_attn_mask(attn_metadata.attn_mask, num_decodes, q_len)
         attn_output, _ = DeviceOperator.npu_fused_infer_attention_score(
             query=fia_query,
             key=key,
@@ -1391,7 +1395,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
             is_prefill_no_cache=False,
             sparse_mode=sparse_mode,
         )
-        return attn_output.reshape(num_tokens, self.num_heads, self.head_size)
+        return unpack_tree_queries(attn_output, actual_seq_q)
 
     def _forward_fia_chunked_prefill_split(
         self,
