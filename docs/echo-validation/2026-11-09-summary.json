@@ -1,7 +1,7 @@
 {
   "schema": "echo-validation-evidence-index-v1",
-  "recorded_utc": "2026-11-09T22:52:06.892373+00:00",
-  "scope": "Evidence-only update for independently reviewed six Base finite P18 diagnostics; formal performance remains pending; production unchanged.",
+  "recorded_utc": "2026-11-10T00:35:32.582302+00:00",
+  "scope": "Scorer-own full83 metrics-ON correctness and logical OFF/ON independent validation; Base formal preparation separately reviewed; performance results remain pending; production unchanged.",
   "base_a5": {
     "scope": "Base full vocabulary, eager, pinned a0 source only",
     "passed": true,
@@ -137,9 +137,9 @@
     "exact_original_archive_recovered": true
   },
   "pending": [
-    "Scorer full83 metrics-ON model capture, its own full P14/P15/P16 CPU replay, and matched OFF/ON analysis.",
-    "Review the new Base formal collection package against the completed, independently reviewed six-diagnostic originals before collecting formal timings.",
-    "Source-specific formal P18 admission, five timing repetitions per arm, and final evidence; no speedup claim."
+    "Complete Base formal collection and independently review its results before any performance conclusion.",
+    "Complete Scorer-own P18 diagnostics, reviewed formal admission, five timing repetitions per arm and final evidence; no speedup claim.",
+    "Overall P17/P18 closure requires the remaining source-specific experiment and final delivery reviews."
   ],
   "CI_policy": "Unrelated inherited CI cleanup must not be mixed back into ECHO.",
   "full_repository_CI_passed": false,
@@ -766,9 +766,19 @@
     "retained_conditional_completion_point_differences": true,
     "global_trace_completeness_verified": false,
     "global_buffer_ownership_verified": false,
-    "full83_metrics_ON_counterpart_passed": false,
+    "full83_metrics_ON_counterpart_passed": true,
     "P17_overall": false,
-    "P18": false
+    "P18": false,
+    "full83_counterpart_report": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-scorer-pair-analysis-v1/matched-result-v1.json",
+      "bytes": 17970,
+      "sha256": "1e9cfac89b0ad24ee0f94e812a4ad9ba3775fce6196a830a6cb37d221d76f64d"
+    },
+    "full83_counterpart_independent_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-scorer-pair-analysis-v1/independent-review-v1.json",
+      "bytes": 33054,
+      "sha256": "6e5af49744fed5b84b53fd0d566901e2ca9906a6bbe0ea19aef9061de1f154dc"
+    }
   },
   "Base_six_finite_P18_diagnostics": {
     "score_source": "base_full_vocab",
@@ -950,12 +960,103 @@
     "finite_diagnostic_readiness_reviewed": true,
     "diagnostic_analysis_passed": true,
     "formal_performance_samples": 0,
-    "formal_collection_preparation_review_pending": true,
+    "formal_collection_preparation_review_pending": false,
     "grants_Scorer": false,
     "global_trace_completeness_verified": false,
     "global_buffer_ownership_verified": false,
     "CPU_device_clock_alignment_verified": false,
     "physical_drain_verified": false,
+    "P17_overall": false,
+    "P18": false,
+    "separate_formal_preparation_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-base-formal-tool-controls-v5/independent-preparation-review-candidate-v5.json",
+      "bytes": 21063,
+      "sha256": "ad2c3f5c458fdf66f46ae6956c970cb53281ba9148bf4da2b2585ad6b4064b34"
+    },
+    "separate_first_original_analysis_recovery": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p18-base-formal-analysis-recovery-v1/original-evidence-v1.json",
+      "bytes": 2308,
+      "sha256": "7487f875422ec61adca585cb2aec3b80931e33c0abe6b430368d2d1a2362b40c"
+    },
+    "formal_performance_result_review_pending": true
+  },
+  "Scorer_full83_metrics_ON_and_logical_pair": {
+    "score_source": "scorer_logprob",
+    "model_attempt": "scorer-p17-on-r5-v1",
+    "modes": 12,
+    "cases_per_run": 83,
+    "paired_logical_records": 6975,
+    "own_metrics_ON_P14": true,
+    "own_metrics_ON_P15": true,
+    "own_metrics_ON_P16": true,
+    "own_metrics_ON_comparison": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-p17-on-r5-v1-comparison-v1-single-thread-7200/comparison-v3.json",
+      "bytes": 226706,
+      "sha256": "8053de473a895f8109bd6e79b36612790321aea9909d7c0f9b8f4395567e93c7"
+    },
+    "own_metrics_ON_CPU_status": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-p17-on-r5-v1-comparison-v1-single-thread-7200/status.json",
+      "bytes": 1636,
+      "sha256": "7b95ee1f0c1863370f3d86a1e9dd23dbed9ceffef72db5241feb22fc95ee9e2d"
+    },
+    "own_metrics_ON_CPU_collection": {
+      "workspace_relative_path": "results/echo-all-p-20261109/cpu-ci/scorer-p17-on-r5-v1-comparison-v1-single-thread-7200/collection-receipt.json",
+      "bytes": 1766195,
+      "sha256": "c065ea1d585f3a0d7999628c4451698cd839d1e5ed1efb5ca6cd894e4351ac20"
+    },
+    "own_metrics_ON_original_collection_receipt": {
+      "workspace_relative_path": "results/echo-all-p-20261109/receipts/20261110T000451736643Z-scorer-p17-on-r5-v1-comparison-single-thread-collect.json",
+      "bytes": 1766195,
+      "sha256": "c065ea1d585f3a0d7999628c4451698cd839d1e5ed1efb5ca6cd894e4351ac20"
+    },
+    "logical_pair": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-scorer-pair-analysis-v1/matched-result-v1.json",
+      "bytes": 17970,
+      "sha256": "1e9cfac89b0ad24ee0f94e812a4ad9ba3775fce6196a830a6cb37d221d76f64d"
+    },
+    "independent_result_review": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-scorer-pair-analysis-v1/independent-review-v1.json",
+      "bytes": 33054,
+      "sha256": "6e5af49744fed5b84b53fd0d566901e2ca9906a6bbe0ea19aef9061de1f154dc"
+    },
+    "byte_identical_independent_replay": {
+      "workspace_relative_path": "results/echo-all-p-20261109/p17-scorer-pair-analysis-v1/independent-replay-v1.json",
+      "bytes": 17970,
+      "sha256": "1e9cfac89b0ad24ee0f94e812a4ad9ba3775fce6196a830a6cb37d221d76f64d"
+    },
+    "comparator": {
+      "workspace_relative_path": "results/echo-all-p-20261109/compare_scorer_p17_full83_v2.py",
+      "bytes": 19119,
+      "sha256": "cf4597d6c880d88203bc443f96917f30a443c0e8ed105b2a6e7fbcf679cea777"
+    },
+    "model_collection": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/scorer-p17-on-r5-v1/collection-manifest.json",
+      "bytes": 640952,
+      "sha256": "0a96ca66d8593eeab2f3383713d9a8d0f2ab7752d98f5cdb4de269857d762c35"
+    },
+    "production_manifest": {
+      "workspace_relative_path": "results/echo-all-p-20261109/recovered/scorer-p17-on-r5-v1/staged-manifest.json",
+      "bytes": 378762,
+      "sha256": "5f02332527fffd536ce50aa71894d807e47644d7650a2236fe09ab689229b11b"
+    },
+    "source_changed": [],
+    "raw_changed": [],
+    "proof_changed": [],
+    "production_inventory_records": 811,
+    "python_entity_records": 809,
+    "installed_native_library_link_records": 2,
+    "native_so_entities_collected": false,
+    "native_so_entities_locally_rehashed": false,
+    "original_tar_rehashed_in_logical_pair_review": false,
+    "independent_targeted_controls": 30,
+    "P0_open": 0,
+    "P1_open": 0,
+    "P2_open": 0,
+    "logical_metrics_reviewed": true,
+    "grants_Base": false,
+    "formal_performance_result": false,
+    "global_trace_completeness_verified": false,
+    "global_buffer_ownership_verified": false,
     "P17_overall": false,
     "P18": false
   }
