@@ -177,9 +177,26 @@ shrinks, and had 432/432/432/123. All ten canonical outputs match.
 Scorer explicit-fixed retains its original strict failure at 23 versus 24
 diagnostic completion points. Its limited conditional comparison passed;
 the other four strict comparisons passed. This does not establish global
-trace completeness or universal buffer ownership. Scorer still requires its
-own full83 metrics-ON capture, complete correctness/lifecycle replay and
-paired OFF/ON analysis before overall P17 can close. Base results are separate.
+trace completeness or universal buffer ownership. Scorer subsequently completed
+its own full83 metrics-ON capture and frozen correctness/lifecycle replay.
+The CPU command exited 0, P14/P15/P16 passed and issues were empty; source,
+raw and proof snapshots did not change. These results use Scorer's own
+thresholds 0.50/0.05 and do not borrow Base acceptance.
+
+Its own OFF/ON logical pair passed all 12 modes and 83 cases, including
+6,975 paired logical records. Independent full replay produced a byte-identical
+report, and 30 targeted controls passed. Each side retained its own P16 report,
+CPU terminal and original receipt binding. The 811 production inventory records
+comprise 809 Python entities and two installed-native-library link records.
+The native links were checked against stage/preflight target and hash evidence;
+the collected raw data has no native .so entities to rehash locally.
+
+This closes the reviewed Scorer logical metrics counterpart within the pinned
+eager protocol. The five-arm native evidence is a separate finite result.
+Neither result supplies a performance measurement, global trace completeness,
+universal ownership or overall P17/P18 completion. Scorer still requires its
+own P18 diagnostics and formal collection. The evidence index binds the exact
+reports, independent review and original collection metadata.
 
 P18 has no formal performance result. All six Base diagnostic captures now
 completed with clean exit 0 and were recovered. The independently reviewed
@@ -211,9 +228,11 @@ absence of synchronization. The source-derived branch and long-path member
 checks were independently reviewed before the six complete raw analyses.
 
 This is finite Base diagnostic readiness only. Scorer requires its own
-diagnostics. Formal timing still requires a separately reviewed collection
-package, matching outputs, fresh process/cache state, public warmup and five
-repetitions per arm. No formal performance sample or speedup is claimed.
+diagnostics. The Base formal collection preparation has since passed its
+separate recovery review. Completing that collection and its result review
+still requires matching outputs, fresh process/cache state, public warmup and
+five repetitions per arm. No completed formal performance comparison or
+speedup is claimed.
 
 ## CI and change boundaries
 
