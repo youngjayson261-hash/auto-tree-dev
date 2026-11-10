@@ -245,6 +245,13 @@ The two complete diagnostic captures are not a replacement for the formal
 matrix or repeated-performance requirements above and do not close overall
 P17/P18.
 
+The later budget-64 scan changes only frontier width to 4; depth remains
+16. The four initial groups were extended by two independent 0.40/0.50
+measurements, without repeating the earlier groups. Its single-run table
+and the historical width-8 comparison are in the same experiment notes.
+This adds no new-width
+P16/native acceptance or overall P17/P18 claim.
+
 ## CI and change boundaries
 
 Full repository CI still has separately recorded inherited failures. Those
