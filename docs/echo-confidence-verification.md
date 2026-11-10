@@ -234,6 +234,17 @@ still requires matching outputs, fresh process/cache state, public warmup and
 five repetitions per arm. No completed formal performance comparison or
 speedup is claimed.
 
+## Exploratory Scorer budget scans and profiles
+
+The user-requested single-run Scorer budget-48 and budget-64 scans, and two
+selected budget-64 profiles, are recorded in the
+[Scorer experiment notes](echo-scorer-budget-experiments.md). The dynamic
+group selected for profiling is threshold 0.10, the highest observed
+unprofiled confidence throughput at budget 64; fixed is a separate control.
+The two complete diagnostic captures are not a replacement for the formal
+matrix or repeated-performance requirements above and do not close overall
+P17/P18.
+
 ## CI and change boundaries
 
 Full repository CI still has separately recorded inherited failures. Those
