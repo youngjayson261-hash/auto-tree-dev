@@ -244,3 +244,99 @@ experimental failure. No kernel repair was included in this work.
 
 Unrelated inherited CI cleanup remains excluded from ECHO. These results do
 not authorize restoring reverted formatting, logger, import or naming changes.
+
+## Requested width-4 fixed and confidence-0.30 profiles
+
+After the width-4 six-group scan, the user explicitly selected fixed and
+confidence 0.30 for one profile each. This is a different pair from the
+width-8 fixed/0.10 captures above. Threshold 0.30 was not the fastest observed
+confidence threshold in the six-group scan.
+
+The captures retain depth 16, non-root budget 64, frontier width 4 and
+candidate size 64; Qwen3-8B plus Qwen3-8B-Domino-b16 on physical card 7 of
+148, logical device 0, TP/PP/DP 1, eager/uni and synchronous scheduling.
+Input is the same 34-token integer-list prompt, output is 128 tokens,
+temperature and seed are zero, and EOS is ignored. Each arm has a fresh
+process and private cache, and the same excluded one-token public warmup.
+Level2 profiling covers one complete measured request; record-shapes,
+stack and memory switches are disabled. The shape observations below come
+from native compute metadata. Both effective arms passed 118 remote CPU
+checks without skips, completed one native save step and produced identical
+canonical 128-token output. Production feature source was unchanged.
+
+Fixed succeeded on its first model attempt. The original confidence-0.30
+driver exited with SIGKILL (-9), without a usable sample or complete trace.
+It did not time out; recorded container OOM/oom-kill counters were zero.
+The signal sender is unknown. At the user's request, only this failed arm
+was restarted in a new owned attempt. Its replacement exited 0, as did its
+supervisor, with complete cleanup and no remaining live members. There are
+three model attempts and two effective profiles; fixed was not repeated.
+The failed attempt is retained and excluded from the comparison.
+
+| Recorded observation | Fixed | Confidence 0.30 |
+| --- | ---: | ---: |
+| Consumed generated / published / verified non-root nodes | 576 / 576 / 576 | 576 / 508 / 508 |
+| Accepted non-root nodes before frontend clipping | 123 | 118 |
+| Consumed / shortened rounds | 9 / 0 | 9 / 5 |
+| Target forward primary compute, summed milliseconds | 180.815466 | 179.079 |
+| Draft primary compute, summed milliseconds | 102.702823 | 111.991 |
+| Target forward primary tasks | 5,840 | 6,164 |
+| Draft primary tasks | 13,019 | 18,677 |
+| Explicit handler wait markers / summed milliseconds | 0 / 0 | 10 / 595.986280 |
+| Asynchronous device-to-device copies / bytes | 1,174 / 26,367,045 | 1,892 / 106,047,765 |
+
+Verified nodes decrease by 11.81%, while recorded Target forward primary
+compute time changes by about -0.96% and Draft time by +9.04%. Native
+submission-chain attribution and resolved shape strings show a concrete
+execution difference: Target matrix multiplications use 65 input rows in
+fixed decode, whereas the dynamic capture includes 45, 49, 57, 61 and 65.
+The recorded decode Attention query and output shapes remain
+`1,65,32,128` in both captures, with 324 calls each. Their KV-cache capacities
+are different (1,354 and 1,357 blocks), so their complete Attention shapes
+must not be called identical. Matrix-multiplication call counts include
+layers, projections and prefill; they are not verification-round counts.
+
+These observations show that shortening changes some dense computation,
+while not all recorded work scales with the logical verification count.
+Extra draft work, copies and explicit waits are investigation targets.
+They do not establish which cost caused the unprofiled throughput difference.
+The original unprofiled fixed/0.30 throughput remains 9.714244/9.567967 token/s.
+Profiler timing does not replace it. Device duration sums may overlap;
+CPU ranges include instrumentation and blocking. Two single-input captures
+do not establish statistical speedup or dataset accuracy.
+
+A resource snapshot during the fixed attempt observed two foreign
+initialization processes, each using 106 MB. A later authorized clear check
+found them already gone, so its actual clear-actions list was empty.
+Their exact overlap with the measured profile window is unconfirmed.
+That local check briefly held the nonblocking lifecycle mutex and interrupted
+the sequence controller; fixed itself completed successfully and its
+standard terminal receipt was recovered before proceeding. Before the
+replacement launch, a fresh card-7 check found a foreign service again;
+it was stopped under the user's standing authorization, then the card was
+checked idle. The loaded replacement snapshot contains only the owned ECHO
+driver. These point-in-time observations do not prove continuous exclusivity.
+
+All recorded tasks lie in their device recording windows; four fixed and
+eight dynamic tail-task intervals extend beyond their CPU generation marker
+and remain in the analysis. This does not prove global trace completeness,
+CPU/device clock alignment or physical drain ordering. Overall P17/P18 and
+new-width/threshold P16/native OFF/ON acceptance remain pending.
+
+The workspace retains 6,413 original members totaling 708,897,995 bytes,
+plus two archives totaling 75,242,633 bytes. Local report location:
+`results/echo-scorer-topk4-budget64-profiling-20261110/report-v3.html`.
+The comparison JSON and report link to both traces, native databases,
+original archives, per-member manifests and integer-based analyses.
+
+| Width-4 artifact | SHA256 |
+| --- | --- |
+| Fixed profile archive | `373fd4fcbf9bf6d2265fffdf4eecedf36c2aa63098169462ee87c62305c92941` |
+| Replacement confidence-0.30 archive | `695e8d13d4ef12adf52724fdc605d9ed3ea71bf1956f8841fac73c35efbf0325` |
+| Local report v3 | `f7ff4eb92b191d5add369137cf141e751c722575f4c975389e869990fecda3ab` |
+| Machine-readable comparison v3 | `b8e65b9fed5af704f8733b7ae1f1ef5c110b231b14dca79fbce44f130bce933e` |
+| Native Target shape evidence | `1f60f3c3481c1cabdd9167eec8c6c2a42f453bec1bfed2466f692906d595e24c` |
+
+GSM8K was discussed for a later fixed-subset, multi-input and multi-round
+experiment; no dataset run is included in these captures. No unrelated CI
+cleanup was restored.
