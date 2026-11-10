@@ -1,4 +1,4 @@
-# Exploratory Scorer tree-budget measurements
+# Exploratory Scorer tree-budget and frontier-width measurements
 
 These user-requested measurements explore confidence pruning with Scorer
 probabilities. They are single-request observations, not a completed formal
@@ -8,7 +8,8 @@ source was not changed for these measurements.
 ## Configuration
 
 - Target: `Qwen3-8B`; draft: `Qwen3-8B-Domino-b16`.
-- Confidence source: `scorer_logprob`; depth 16, top-k 8, candidate size 64.
+- Confidence source: `scorer_logprob`; depth 16 and candidate size 64.
+  The initial budget scans use top-k 8; the later width scan uses top-k 4.
 - Non-root tree budgets: 48 and 64. Target capacities including root are 49
   and 65 respectively. Both use the kernel's capacity padding of 64.
 - TP/PP/DP: 1; one physical Ascend 910B2, logical device 0 in the owned
@@ -70,6 +71,95 @@ No dynamic group exceeded fixed within either budget. At budget 64, threshold
 does not by itself establish greater output throughput. Neither repeated
 samples nor randomized ordering support a significance or cross-budget
 speedup claim here.
+
+## Budget 64 with frontier width 4
+
+The next user-requested scan changes only the engine's frontier width from
+8 to 4. Depth remains 16, budget remains 64, and the Scorer candidate size
+remains 64. This is a narrower-frontier experiment, not a test of a greater
+maximum draft depth. Model assets, source, input, sampling, eager execution,
+TP/PP/DP, cache policy and excluded public warmup are unchanged.
+
+Each of the following groups has one new effective unprofiled measurement.
+The earlier top-k-8 measurements above were not repeated.
+
+| Group | Output token/s | Request seconds | S | V | Accepted | Accepted/V | Consumed/shrunk rounds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Fixed | 9.714244 | 13.176527 | 576 | 576 | 123 | 21.35% | 9/0 |
+| Confidence 0.10 | 9.551828 | 13.400576 | 576 | 560 | 121 | 21.61% | 9/2 |
+| Confidence 0.20 | 9.510596 | 13.458672 | 576 | 536 | 120 | 22.39% | 9/3 |
+| Confidence 0.30 | 9.567967 | 13.377973 | 576 | 508 | 118 | 23.23% | 9/5 |
+| Confidence 0.40 | 9.598984 | 13.334745 | 576 | 524 | 118 | 22.52% | 9/5 |
+| Confidence 0.50 | 9.445127 | 13.551961 | 640 | 548 | 126 | 22.99% | 10/7 |
+
+For the same threshold, the observed width comparison is:
+
+| Group | Top-k 8 token/s | Top-k 4 token/s | Relative throughput change |
+| --- | ---: | ---: | ---: |
+| Fixed | 9.734706 | 9.714244 | -0.21% |
+| Confidence 0.10 | 9.640654 | 9.551828 | -0.92% |
+| Confidence 0.20 | 9.536804 | 9.510596 | -0.27% |
+| Confidence 0.30 | 9.578075 | 9.567967 | -0.11% |
+
+These are finite single-request observations taken at different times, with
+no randomized cross-width order or repetitions. A higher Accepted/V ratio
+does not establish a throughput improvement or statistical significance.
+All six outputs match the same-source canonical 128-token output. No
+broader answer-accuracy, new-width P16, native OFF/ON, overall P17 or formal
+P18 acceptance is claimed.
+
+The original sequence stopped at three prelaunch resource checks before
+the 0.10 model was started. Those blocked checks and user-authorized cleanup
+receipts are preserved. The first four groups used exactly four models;
+fixed and 0.10 were never repeated. The later 0.40 and 0.50 extension adds
+exactly two separately frozen models, without repeating any earlier group.
+Later groups were started before the preceding group's full download and
+analysis to shorten handoff gaps. Each group still used a separate process.
+Resource checks are finite snapshots, not continuous
+proof of an interference-free measurement window. In particular, the 0.10
+snapshot whose filename contains `during` was collected after its terminal
+exit; the name does not imply measurement-window coverage.
+
+Every raw member, archive payload and complete analysis was independently
+checked against its owned attempt and original collection. S and V retain
+the consumed-proposal definition above; total produced nodes and the unused
+terminal proposal are stored separately in the machine-readable summary.
+
+Summary: `scorer-topk4-budget64-experiment-summary-v4.json`, SHA256
+`412af1cc2482989a352b028c3fbc19797f6f673d1b09ac8725cb0d82d603eed5`.
+
+Independent actual-result review SHA256:
+`a264ac45bd5214b0591e49bd1c4c689b85b0a9989aeed4f5d5bc326f6ffb1599`.
+
+The 0.40 and 0.50 rows were requested after the first four measurements.
+They retain width 4, depth 16, budget/candidate size 64, the same source,
+input and sampling, independent processes/caches, one excluded public
+warmup and no profiler. Only the confidence threshold changes. The
+existing width-4 fixed row is their historical same-configuration
+reference, measured earlier; no new fixed or old-threshold run was added.
+There is no width-8/budget-64 0.40 or 0.50 pair in this scan. Earlier
+width-8/budget-48 0.50 calibration is a separate scope.
+
+At 0.40, verified non-root nodes change by -9.03% and observed throughput
+by -1.19% versus that fixed row.
+
+At 0.50, verified non-root nodes change by -4.86% and observed throughput
+by -2.77% versus that fixed row.
+
+The 0.40 postterminal resource snapshot contains foreign PID 3232279,
+an mc148 HBM-pool process. The recorded host-UTC start time is about
+17.34 seconds after that model's driver ended.
+Host/container clock and timezone receipts, the nonempty snapshot,
+terminal proof and the authorized cleanup before 0.50 are preserved.
+This identifies the timing of that recorded PID instance; it does
+not establish a continuously interference-free measurement window
+or the broader history of its container.
+
+Six-group summary: `scorer-topk4-budget64-six-group-summary-v4.json`, SHA256
+`78f41de8b2affed38a7db95d7ba8048f42e4681f77f248949391e1cbfc84cd8b`.
+
+Extra-two actual-result review SHA256:
+`848a99b095ceeb4028527591b24ec363783c4abaa689fd8fefaa456c17816195`.
 
 ## Two requested budget-64 profiles
 
