@@ -7,6 +7,10 @@ archives remain in the experiment workspace; this Git repository contains an
 index, not those archives. Results below are scoped to the recorded eager,
 single-card, greedy protocol.
 
+Experimental single-request Qwen3 Domino FULL graph support is described in
+[the bounded graph guide](echo-prefix-fullgraph.md). The eager acceptance
+results below do not establish graph generation equivalence.
+
 ## Verified results on 2026-11-09
 
 | Run | Result | Scope |
