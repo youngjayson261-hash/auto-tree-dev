@@ -4,6 +4,7 @@
 """Exercise runtime admission with the native DFlash configuration layout."""
 
 import ast
+import importlib.util
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -111,6 +112,13 @@ class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
                 ),
                 "validate_runtime_facts": self.record_facts,
             },
+        }
+        prefix_path = Path(__file__).resolve().parents[4] / "vllm_ascend/worker/v2/spec_decode/tree/prefix_graph.py"
+        prefix_spec = importlib.util.spec_from_file_location("_compat_prefix_graph", prefix_path)
+        prefix_module = importlib.util.module_from_spec(prefix_spec)
+        prefix_spec.loader.exec_module(prefix_module)
+        bindings["vllm_ascend.worker.v2.spec_decode.tree.prefix_graph"] = {
+            "prefix_graph_configured": prefix_module.prefix_graph_configured,
         }
         modules = {}
         for name, attributes in bindings.items():

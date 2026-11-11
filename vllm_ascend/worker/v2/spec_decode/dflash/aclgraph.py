@@ -141,6 +141,11 @@ class DFlashAclGraphManager(DFlashCudaGraphManager):
 
     def run_fullgraph(self, desc: BatchExecutionDescriptor) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         """Override run_fullgraph to update full graph params in run_fullgraph."""
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        if vllm_version_is("0.31.0") and prefix_graph_configured(self.vllm_config):
+            # v0.31 bypasses Tree's newer _prepare_graph_replay callback.
+            self.speculator._draft_graph_used = True
         num_tokens = desc.num_tokens
         attn_backend = list(self.speculator.attn_backends.values())[0]
         draft_attn_metadatas = self.speculator.build_draft_attn_metadatas(

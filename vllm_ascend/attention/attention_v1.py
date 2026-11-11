@@ -78,6 +78,11 @@ from vllm_ascend.device.hardware_profile import HardwareCapability, get_current_
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.attention_fence import attention_transfer_window
 from vllm_ascend.ops.triton.spec_decode.tree.kv_transport import gather_tree_cache_rows
 from vllm_ascend.utils import MINIMAX_M3_FP8_KV_CACHE_BLOCK_SIZE, is_minimax_m3_fp8_kv_cache, vllm_version_is
+from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
+    prefix_capture_active,
+    prefix_graph_configured,
+    prefix_shape,
+)
 
 # default max value of sliding window size
 SWA_INT_MAX = 2147483647
@@ -400,11 +405,9 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             num_decode=num_decodes,
             num_tokens=common_attn_metadata.num_actual_tokens,
             for_capture=common_attn_metadata.for_cudagraph_capture,
-            query_lens=(
-                None
-                if common_attn_metadata.for_cudagraph_capture
-                else (query_start_loc_cpu[1 : num_decodes + 1] - query_start_loc_cpu[:num_decodes]).tolist()
-            ),
+            query_lens=(query_start_loc_cpu[1 : num_decodes + 1] - query_start_loc_cpu[:num_decodes]).tolist()
+            if (not common_attn_metadata.for_cudagraph_capture or prefix_capture_active())
+            else None,
         )
 
         # TODO: Yet another unnecessary H2D while we already have a query_start_loc on device
@@ -415,7 +418,11 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             # TND: last actual_seq_q must equal the padded hidden length (queryT).
             # A short prefill can miss the dummy qsl entry; append the graph size.
             num_input_tokens = common_attn_metadata.num_input_tokens
-            if actual_seq_lengths_q and num_input_tokens > actual_seq_lengths_q[-1]:
+            if (
+                actual_seq_lengths_q
+                and num_input_tokens > actual_seq_lengths_q[-1]
+                and not prefix_graph_configured(self.vllm_config)
+            ):
                 actual_seq_lengths_q = actual_seq_lengths_q + [num_input_tokens]
         else:
             # vLLM main keeps speculative-decode request metadata at the real
@@ -607,13 +614,20 @@ class TreeFIAParamProvider:
     layer_name: str | None
     num_decodes: int
     query_len: int
+    prefix_gear: bool = False
 
     def resolve(self, attn_metadata) -> dict[str, Any]:
         metadata = attn_metadata[self.layer_name]
+        actual_queries = [self.query_len] * self.num_decodes
+        if self.prefix_gear:
+            _, q = prefix_shape(metadata.actual_seq_lengths_q, metadata.num_decodes, self.query_len)
+            if metadata.num_prefills != 0 or metadata.attn_mask is None or metadata.attn_mask.ndim != 4:
+                raise RuntimeError("prefix graph replay requires real tree decode metadata")
+            actual_queries = [q]
         lengths = list(metadata.seq_lens_list[: self.num_decodes])
         lengths += [1] * (self.num_decodes - len(lengths))
         params = {
-            "actual_seq_lengths": [self.query_len] * self.num_decodes,
+            "actual_seq_lengths": actual_queries,
             "actual_seq_lengths_kv": lengths,
         }
         if metadata.attn_mask is not None:
@@ -941,12 +955,21 @@ class AscendAttentionBackendImpl(AttentionImpl):
         key, value, block_size, block_table, actual_seq_lengths_kv = self._get_fia_params(key, value, attn_metadata)
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         bsnd = self._tree_fia_bsnd_shape(num_tokens, attn_metadata.num_decodes)
+        prefix_gear = prefix_graph_configured(self.vllm_config)
+        if prefix_gear:
+            if attn_metadata.num_prefills != 0 or attn_metadata.attn_mask is None or attn_metadata.attn_mask.ndim != 4:
+                raise RuntimeError("prefix graph capture requires a real tree mask")
+            physical_q = query.shape[0]
+            prefix_shape(attn_metadata.actual_seq_lengths_q, attn_metadata.num_decodes, physical_q)
+            if not 1 <= physical_q <= attn_metadata.attn_mask.shape[-2]:
+                raise ValueError("physical tree graph exceeds mask capacity")
+            bsnd = (1, physical_q)
         if bsnd is None:
             raise RuntimeError("Ragged tree decode requires eager execution; ragged graph capture is unsupported")
         num_decodes, q_len = bsnd
         fia_query = query[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
         fia_output = output[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
-        actual_seq_lengths_q = [q_len] * num_decodes
+        actual_seq_lengths_q = attn_metadata.actual_seq_lengths_q if prefix_gear else [q_len] * num_decodes
         if isinstance(actual_seq_lengths_kv, torch.Tensor):
             actual_seq_lengths_kv = actual_seq_lengths_kv[:num_decodes]
         else:
@@ -1000,7 +1023,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         if paged_kwargs is not None:
             operation = _tree_fia_paged_cache_out
             op_kwargs.update(paged_kwargs)
-        register_task(operation, op_kwargs, TreeFIAParamProvider(self._layer_name, num_decodes, q_len))
+        register_task(operation, op_kwargs, TreeFIAParamProvider(self._layer_name, num_decodes, q_len, prefix_gear))
         return output.view(num_tokens, self.num_heads, self.head_size), num_tokens
 
     def full_graph_fia_v2(

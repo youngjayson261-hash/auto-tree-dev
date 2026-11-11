@@ -438,6 +438,8 @@ class NPUModelRunner(GPUModelRunner):
         )
         cfg = self.vllm_config
         finegrained_tp = getattr(getattr(self, "ascend_config", None), "finegrained_tp_config", None)
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
         validate_runtime_facts(
             async_scheduling=cfg.scheduler_config.async_scheduling,
             tp=cfg.parallel_config.tensor_parallel_size,
@@ -463,6 +465,7 @@ class NPUModelRunner(GPUModelRunner):
             grammar=any(p.structured_outputs is not None for p in sampling_params),
             processors_supported=processors_supported,
             scorer_admitted=admitted,
+            graph_admitted=prefix_graph_configured(cfg),
         )
         speculator._tree_full_vocab_size = expected_vocab
 
@@ -1013,6 +1016,12 @@ class NPUModelRunner(GPUModelRunner):
 
     def gather_batch_req_state(self, scheduler_output: SchedulerOutput, dummy_run: bool):
         batch_state, uniform_token_count = super().gather_batch_req_state(scheduler_output, dummy_run)
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        if prefix_graph_configured(self.vllm_config) and self.cudagraph_manager is not None:
+            self.cudagraph_manager.tree_prefix_decode = bool(
+                batch_state is not None and not batch_state.has_prefill and not dummy_run
+            )
         if self._uses_flashmla and batch_state is not None:
             # The backend order must precede derived inputs and graph dispatch.
             batch_state, uniform_token_count = prepare_flashmla_batch_req_state(batch_state, uniform_token_count)
@@ -1435,7 +1444,18 @@ class NPUModelRunner(GPUModelRunner):
     ) -> AscendInputBatch:
         # vLLM #56456 added num_active_loras to prepare_inputs on main; it
         # only feeds FastPrefillHelper, which this Ascend path does not use.
-        return self._prepare_inputs_impl(scheduler_output, batch_req_state, batch_desc)
+        batch = self._prepare_inputs_impl(scheduler_output, batch_req_state, batch_desc)
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        if prefix_graph_configured(self.vllm_config):
+            q, capacity = batch.num_tokens, batch.num_tokens_after_padding
+            self.input_buffers.is_padding[:q].fill_(False)
+            self.input_buffers.is_padding[q:capacity].fill_(True)
+            self.input_buffers.input_ids[q:capacity].zero_()
+            self.input_buffers.positions[q:capacity].zero_()
+            if batch.slot_positions is not None:
+                batch.slot_positions[q:capacity].zero_()
+        return batch
 
     def prepare_dummy_attn(
         self, input_batch: AscendInputBatch, valid_state_slots: bool = False
@@ -1756,6 +1776,14 @@ class NPUModelRunner(GPUModelRunner):
         This function is only designed to satisfied the constraint that when the layout is TND,
         the first dimension of `hidden_states` must equal the last element of `actual_seq_lengths_q`.
         """
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        if cudagraph_runtime_mode == CUDAGraphMode.FULL and prefix_graph_configured(self.vllm_config):
+            if num_reqs != 1 or not 1 <= int(query_start_loc_np[1]) <= num_tokens_padded:
+                raise ValueError("prefix graph padding must preserve one real query")
+            # BSND carries physical Q separately from actual_seq_lengths=[q].
+            # Never append a second request for padding: its KV rows do not exist.
+            return query_start_loc_np, 1
         # TODO: need refactor later, related to vllm PR #34043 this pr delete func
         # relax_for_mixed_batch_cudagraphs, num_reqs no longer equals the actual number of requests.
         descriptor_num_reqs = batch_desc_num_reqs if batch_desc_num_reqs is not None else num_reqs_padded

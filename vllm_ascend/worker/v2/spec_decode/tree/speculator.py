@@ -729,7 +729,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                     mm_inputs,
                     **parent_kwargs,
                 )
-            # FULL replay only runs draft forward; tree construction has its own graph.
+            # FULL replay runs the draft path; tree construction has its own graph.
             if not dummy_run:
                 self.tree_graph_stats.record_lookup("draft", self._draft_graph_used)
                 if self._draft_graph_used:
@@ -788,6 +788,18 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         self.sample_indices.zero_()
         self.sample_pos.zero_()
         self.sample_idx_mapping.fill_(-1)
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        legacy_capture_kwargs = {}
+        if vllm_version_is("0.31.0") and prefix_graph_configured(self.vllm_config):
+            from vllm.v1.attention.backends.utils import PAD_SLOT_ID
+
+            # v0.31 stores the first context rows inside the draft graph and
+            # the remaining rows eagerly. Capture must not touch live KV pages.
+            self._context_slot_mappings.fill_(PAD_SLOT_ID)
+            legacy_capture_kwargs["precompute_context_kv"] = lambda num_reqs: self._precompute_context_kv(
+                0, self._num_graph_context_tokens(num_reqs)
+            )
         existing_draft_graphs = set(self.query_cudagraph_manager.graphs)
         self.query_cudagraph_manager.capture(
             self._run_draft_forward,
@@ -797,10 +809,11 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             self.kv_cache_config,
             self.max_model_len,
             causal=self._group_causal,
-            # Tree stages context eagerly in _prepare_graph_replay; the draft
-            # graph must keep capturing only the parallel query forward.
+            # Newer vLLM stages context eagerly in _prepare_graph_replay.
+            # The legacy callback above retains v0.31's captured context prefix.
             prepare_forward=lambda num_reqs, attn_metadata: None,
             progress_bar_desc=f"Capturing {self._speculator_name.lower()} CUDA graphs",
+            **legacy_capture_kwargs,
         )
         for _ in self.query_cudagraph_manager.graphs.keys() - existing_draft_graphs:
             self.tree_graph_stats.record_capture("draft")
@@ -946,6 +959,10 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 self.tree_graph_stats.record_capture("tree")
                 logger.info("Captured tree ACLGraph scorer_backend=%s num_reqs=%s", self.draft_backend, num_reqs)
             except Exception as exc:
+                from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+                if prefix_graph_configured(self.vllm_config):
+                    raise RuntimeError(f"Prefix FULL tree construction capture failed for batch {num_reqs}") from exc
                 if self.packed_dsv4_verify():
                     raise RuntimeError(f"DSV4 FULL tree construction capture failed for batch {num_reqs}") from exc
                 if self.tree_builder.scorer.name == "dflash2":

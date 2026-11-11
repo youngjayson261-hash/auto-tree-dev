@@ -522,6 +522,25 @@ class AscendModelState(DefaultModelState):
             else None
         )
         tree_visibility = input_batch.tree_visibility
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        if (
+            not for_capture
+            and not getattr(input_batch, "is_dummy", False)
+            and prefix_graph_configured(self.vllm_config)
+            and not bool(np.any(input_batch.is_prefilling_np[: input_batch.num_reqs]))
+        ):
+            if input_batch.num_reqs != 1:
+                raise ValueError("prefix tree FULL metadata requires one real request")
+            if tree_visibility is None:
+                if num_actual_tokens != 1:
+                    raise ValueError("non-root prefix verification requires real tree visibility")
+                from vllm_ascend.ascend_config import get_ascend_config as prefix_ascend_config
+                from vllm_ascend.attention.tree_spec import dummy_tree_visibility
+
+                tree_visibility = dummy_tree_visibility(
+                    1, self.device, budget=prefix_ascend_config().tree_spec_config.budget
+                )
         # Dummy batch has no tree. Only target tree-verify gears (k × 1+budget)
         # need the dummy identity; draft capture must keep its own mask/indices.
         if (

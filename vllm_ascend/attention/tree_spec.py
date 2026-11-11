@@ -134,6 +134,11 @@ def tree_verify_shape(num_tokens: int) -> tuple[int, int] | None:
 
 def dummy_tree_mask_for_capture(num_tokens: int, num_reqs: int) -> bool:
     """Dummy FULL capture only needs the tree layout for ``k × (1+budget)``."""
+    from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_capture_active
+
+    if prefix_capture_active():
+        capacity = tree_query_len()
+        return num_reqs == 1 and capacity is not None and 1 <= num_tokens <= capacity
     shaped = tree_verify_shape(num_tokens)
     return shaped is not None and shaped[0] == num_reqs
 

@@ -1,0 +1,9 @@
+# No PR number has been assigned. Move these entries to the actual numbered
+# release_notes/fragments file and add its matching pr field when opening a PR.
+entries:
+  - category: feature
+    text: >-
+      Added experimental bounded FULL graphs for synchronous, single-request,
+      TP1 Qwen3 Domino tree scoring with scorer_logprob and up to nine capture
+      sizes. Eager/FULL generation equivalence remains unverified; this support
+      does not establish answer accuracy or a throughput improvement.

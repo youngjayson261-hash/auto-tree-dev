@@ -220,6 +220,7 @@ def validate_runtime_facts(
     grammar,
     processors_supported,
     scorer_admitted,
+    graph_admitted=False,
 ):
     """Reject unsupported R1 confidence configurations with concrete reasons."""
     checks = (
@@ -235,7 +236,7 @@ def validate_runtime_facts(
         ),
         (max_concurrent_batches == 1, "concurrent_batches"),
         (bonus_count == 1, "single_root"),
-        (enforce_eager and not tree_graph_present, "eager"),
+        ((enforce_eager and not tree_graph_present) or (graph_admitted is True and enforce_eager is False), "eager"),
         (not adaptive_manager_present, "adaptive_manager"),
         (greedy, "greedy"),
         (not grammar, "grammar"),
