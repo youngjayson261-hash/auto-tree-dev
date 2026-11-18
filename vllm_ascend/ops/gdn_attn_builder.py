@@ -1277,8 +1277,8 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
             # than the tree width, see _build_tree_init_state_indices.
             spec_row_widths = query_lens_cpu[spec_sequence_masks_cpu]
             if shared_gdn_tree is not None:
-                # A complete BS1 row is already token-major. Share logical
-                # columns/windows, but gather this group's state pages.
+                # A BS1 prefix is token-major. Share logical columns/windows,
+                # but bind and clear this group's physical state pages.
                 if (
                     self.spec_tree_slots != shared_gdn_tree.slots
                     or self.spec_conv_width != shared_gdn_tree.conv_width
@@ -1286,10 +1286,12 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
                     or num_spec_decodes != 1
                     or num_prefills != 0
                     or num_decodes != 0
-                    or int(spec_row_widths[0]) != shared_gdn_tree.slots
+                    or int(spec_row_widths[0]) != shared_gdn_tree.query_width
+                    or not 1 < shared_gdn_tree.query_width <= shared_gdn_tree.graph_capacity <= shared_gdn_tree.slots
                 ):
-                    raise ValueError("shared GDN tree metadata requires one complete speculative tree row")
+                    raise ValueError("shared GDN tree metadata requires one matching speculative tree prefix")
                 spec_init_state_indices = shared_gdn_tree.bind_init_state_indices(spec_state_indices_tensor)
+                spec_state_indices_tensor = shared_gdn_tree.bind_state_indices(spec_state_indices_tensor)
                 spec_conv_window_rows = shared_gdn_tree.conv_window_rows
                 spec_conv_prefix_src = shared_gdn_tree.conv_prefix_src
             else:

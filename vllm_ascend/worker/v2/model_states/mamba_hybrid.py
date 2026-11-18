@@ -108,6 +108,8 @@ class AscendMambaHybridAttnMetadata(MambaHybridAttnMetadata):
     tree_prev_num_sampled: torch.Tensor | None = None
     tree_depths: torch.Tensor | None = None
     share_tree_metadata: bool = False
+    tree_query_width: int | None = None
+    tree_graph_capacity: int | None = None
     shared_gdn_tree: "SharedGDNTreeMetadata | None" = None
 
     def get_extra_attn_kwargs(
@@ -160,6 +162,8 @@ class AscendMambaHybridAttnMetadata(MambaHybridAttnMetadata):
                     self.tree_prev_path,
                     self.tree_prev_num_sampled,
                     attn_metadata_builder.spec_conv_width,
+                    query_width=self.tree_query_width,
+                    graph_capacity=self.tree_graph_capacity,
                 )
             if self.shared_gdn_tree.conv_width == attn_metadata_builder.spec_conv_width:
                 kwargs["shared_gdn_tree"] = self.shared_gdn_tree
@@ -675,17 +679,23 @@ class AscendMambaHybridModelState(MambaHybridModelState, AscendModelState):
             tree_prev_path=tree_prev_path,
             tree_prev_num_sampled=tree_prev_num_sampled,
             tree_depths=getattr(input_batch, "tree_depths", None),
-            # Only a real, complete BS1 FULL verify uses this fast path.
-            # Capture/dummy/prefill/truncated rows retain the existing builder.
+            tree_query_width=int(input_batch.num_tokens) if tree_slots is not None else None,
+            tree_graph_capacity=int(num_tokens) if tree_slots is not None else None,
+            # Share only real BS1 FULL decode with Q <= C <= S. The host
+            # widths come from this step, never from a device-side read.
+            # Capture/dummy/prefill/root-only rows retain the existing builder.
             share_tree_metadata=(
                 tree_slots is not None
                 and not for_capture
                 and not input_batch.is_dummy
                 and cudagraph_mode == CUDAGraphMode.FULL
                 and input_batch.num_reqs == num_reqs == 1
-                and input_batch.num_tokens == num_tokens == tree_slots
+                and 1 < input_batch.num_tokens <= num_tokens <= tree_slots
+                and getattr(input_batch, "tree_parents", None) is not None
+                and getattr(input_batch, "tree_num_nodes", None) is not None
+                and getattr(input_batch, "tree_depths", None) is not None
                 and num_decode_draft_tokens_cpu is not None
-                and int(num_decode_draft_tokens_cpu[0]) == tree_slots - 1
+                and int(num_decode_draft_tokens_cpu[0]) == input_batch.num_tokens - 1
                 and not bool(is_prefilling[0])
             ),
         )

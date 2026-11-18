@@ -6,3 +6,5 @@ entries:
     text: Added guarded Qwen3.8 DFlash2 TP2 tree decoding and bounded FULL decode capture/dispatch for capacities 1, 9, 17, 25 and 33.
   - category: performance
     text: Reused existing tree depths for eligible cropped GDN decode metadata, preserving unsupported-path fallback.
+  - category: performance
+    text: Shared eligible BS1 cropped GDN logical metadata per step while preserving per-cache physical pages, fixed buffers and inactive-slot clearing.
