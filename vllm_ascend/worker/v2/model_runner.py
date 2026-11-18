@@ -394,7 +394,12 @@ class NPUModelRunner(GPUModelRunner):
             admit_base_confidence_scorer,
             validate_runtime_facts,
         )
-        from vllm_ascend.worker.v2.spec_decode.tree.scoring import DominoScorer, IndependentScorer
+        from vllm_ascend.worker.v2.spec_decode.tree.scoring import (
+            DFlash2Scorer,
+            DominoScorer,
+            IndependentScorer,
+            MarkovScorer,
+        )
 
         speculator = self.speculator
         model = speculator.model
@@ -407,7 +412,23 @@ class NPUModelRunner(GPUModelRunner):
             and model.logits_processor.org_vocab_size == expected_vocab
         )
         confidence_source = getattr(speculator, "_tree_confidence_source", "base_full_vocab")
-        if confidence_source == "base_full_vocab":
+        scorer_type = type(speculator.tree_builder.scorer)
+        if scorer_type in (MarkovScorer, DFlash2Scorer):
+            from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import admit_verification_confidence_scorer
+
+            expected_vocab = getattr(speculator, "_tree_full_vocab_size", None)
+            admitted = admit_verification_confidence_scorer(
+                scorer_type,
+                IndependentScorer,
+                DominoScorer,
+                getattr(speculator, "_tree_mapped_confidence_proven", False) is True
+                and type(expected_vocab) is int
+                and expected_vocab > 0,
+                confidence_source,
+                markov_type=MarkovScorer,
+                dflash2_type=DFlash2Scorer,
+            )
+        elif confidence_source == "base_full_vocab":
             admitted = admit_base_confidence_scorer(
                 type(speculator.tree_builder.scorer), IndependentScorer, DominoScorer, bool(full_vocab)
             )
@@ -1018,7 +1039,10 @@ class NPUModelRunner(GPUModelRunner):
         batch_state, uniform_token_count = super().gather_batch_req_state(scheduler_output, dummy_run)
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
-        if prefix_graph_configured(self.vllm_config) and self.cudagraph_manager is not None:
+        if (
+            prefix_graph_configured(self.vllm_config)
+            or self.ascend_config.tree_spec_config.verification_eager_pad_to_full_tree
+        ) and self.cudagraph_manager is not None:
             self.cudagraph_manager.tree_prefix_decode = bool(
                 batch_state is not None and not batch_state.has_prefill and not dummy_run
             )
@@ -1447,7 +1471,10 @@ class NPUModelRunner(GPUModelRunner):
         batch = self._prepare_inputs_impl(scheduler_output, batch_req_state, batch_desc)
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
-        if prefix_graph_configured(self.vllm_config):
+        if (
+            prefix_graph_configured(self.vllm_config)
+            or self.ascend_config.tree_spec_config.verification_eager_pad_to_full_tree
+        ):
             q, capacity = batch.num_tokens, batch.num_tokens_after_padding
             self.input_buffers.is_padding[:q].fill_(False)
             self.input_buffers.is_padding[q:capacity].fill_(True)
@@ -1779,11 +1806,17 @@ class NPUModelRunner(GPUModelRunner):
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
         if cudagraph_runtime_mode == CUDAGraphMode.FULL and prefix_graph_configured(self.vllm_config):
-            if num_reqs != 1 or not 1 <= int(query_start_loc_np[1]) <= num_tokens_padded:
-                raise ValueError("prefix graph padding must preserve one real query")
-            # BSND carries physical Q separately from actual_seq_lengths=[q].
-            # Never append a second request for padding: its KV rows do not exist.
-            return query_start_loc_np, 1
+            from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_shape
+
+            descriptor_reqs = batch_desc_num_reqs if batch_desc_num_reqs is not None else num_reqs_padded
+            if num_reqs < 1 or num_reqs != descriptor_reqs or num_tokens_padded % num_reqs:
+                raise ValueError("prefix graph padding must preserve the real request count")
+            prefix_shape(
+                [int(end) for end in query_start_loc_np[1 : num_reqs + 1]], num_reqs, num_tokens_padded // num_reqs
+            )
+            # BSND carries per-request capacity separately from real lengths.
+            # Padding must not append fictitious requests with no KV rows.
+            return query_start_loc_np, num_reqs
         # TODO: need refactor later, related to vllm PR #34043 this pr delete func
         # relax_for_mixed_batch_cudagraphs, num_reqs no longer equals the actual number of requests.
         descriptor_num_reqs = batch_desc_num_reqs if batch_desc_num_reqs is not None else num_reqs_padded

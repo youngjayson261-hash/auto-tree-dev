@@ -160,7 +160,14 @@ def admit_base_confidence_scorer(scorer_type, independent_type, domino_type, ful
 
 
 def admit_verification_confidence_scorer(
-    scorer_type, independent_type, domino_type, full_vocab_proven: bool, source: str = "base_full_vocab"
+    scorer_type,
+    independent_type,
+    domino_type,
+    full_vocab_proven: bool,
+    source: str = "base_full_vocab",
+    *,
+    markov_type=None,
+    dflash2_type=None,
 ) -> bool:
     """Admit exact adapters with proven logp semantics and global token IDs.
 
@@ -169,9 +176,14 @@ def admit_verification_confidence_scorer(
     Independent uses its full distribution; Domino may use its Top-C proposal.
     Other scorers and subclasses must prove their own score and mapping contract.
     """
-    return source in ("base_full_vocab", "scorer_logprob") and admit_base_confidence_scorer(
-        scorer_type, independent_type, domino_type, full_vocab_proven
-    )
+    if source not in ("base_full_vocab", "scorer_logprob") or full_vocab_proven is not True:
+        return False
+    if admit_base_confidence_scorer(scorer_type, independent_type, domino_type, True):
+        return True
+    if markov_type is not None and scorer_type is markov_type:
+        return True
+    # DFlash2 supplies a normalized candidate distribution, not full base logits.
+    return dflash2_type is not None and scorer_type is dflash2_type and source == "scorer_logprob"
 
 
 def confidence_source_metadata(
@@ -184,7 +196,7 @@ def confidence_source_metadata(
     effective_candidates = None
     if domino:
         effective_candidates = width if candidate_size is None else max(width, min(candidate_size, vocab_size))
-    return {
+    metadata = {
         "source": source,
         "scorer": scorer_name,
         "threshold": threshold,
@@ -200,6 +212,20 @@ def confidence_source_metadata(
         "suffix_score_source": "domino_top_c" if source == "scorer_logprob" and domino else "base_full_vocab",
         "token_mapping_requirement": "full_vocab_identity",
     }
+    if scorer_name == "markov":
+        metadata["token_mapping_requirement"] = "validated_injective_draft_to_target"
+        metadata["prefix_score_source"] = "base_full_draft_vocab"
+        metadata["suffix_score_source"] = (
+            "markov_full_draft_vocab" if source == "scorer_logprob" else "base_full_draft_vocab"
+        )
+    elif scorer_name == "dflash2":
+        metadata["token_mapping_requirement"] = "global_target_candidate_ids"
+        metadata["suffix_score_source"] = "dflash2_candidate_lattice"
+        metadata["prefix_score_source"] = None
+        metadata["candidate_size_configured"] = candidate_size
+        metadata["candidate_size_effective"] = candidate_size
+        metadata["candidate_size_rule"] = "candidate_selector.top_k"
+    return metadata
 
 
 def validate_runtime_facts(
@@ -225,7 +251,7 @@ def validate_runtime_facts(
     """Reject unsupported R1 confidence configurations with concrete reasons."""
     checks = (
         (not async_scheduling, "async_scheduling"),
-        (tp == 1 and pp == 1, "parallelism"),
+        (type(tp) is int and tp >= 1 and type(pp) is int and pp == 1, "parallelism"),
         (type(dp) is int and dp == 1, "data_parallelism"),
         (all(type(size) is int and size == 1 for size in (pcp, dcp)), "context_parallelism"),
         (

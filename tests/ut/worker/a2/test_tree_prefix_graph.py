@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU contracts for the bounded single-request tree FULL graph path.
+"""CPU contracts for bounded tree FULL graphs and real request boundaries.
 
 Load the dependency-free admission helper directly. Method extraction lets
 these contracts run without importing an NPU worker or a vLLM installation.
@@ -30,7 +30,7 @@ def config():
         additional_config={
             "tree_spec_config": dict(enabled=True, budget=64, verification_confidence_source="scorer_logprob")
         },
-        scheduler_config=NS(max_num_seqs=1, async_scheduling=False),
+        scheduler_config=NS(max_num_seqs=1, max_num_batched_tokens=2048, async_scheduling=False),
         parallel_config=NS(
             **{
                 k: 1
@@ -79,7 +79,16 @@ class Admission(unittest.TestCase):
         fixture.validate(fixture.runner)
         self.assertTrue(fixture.facts["graph_admitted"])
         policy.validate_runtime_facts(**fixture.facts)
-        fixture.runner.vllm_config.compilation_config.cudagraph_capture_sizes = [17, 65]
+        fixture.runner.vllm_config.compilation_config.cudagraph_capture_sizes = [17, 66]
+        fixture.validate(fixture.runner)
+        self.assertFalse(fixture.facts["graph_admitted"])
+        with self.assertRaisesRegex(ValueError, "eager"):
+            policy.validate_runtime_facts(**fixture.facts)
+        fixture.runner.vllm_config = config()
+        fixture.runner.vllm_config.additional_config["tree_spec_config"]["verification_confidence_source"] = (
+            "base_full_vocab"
+        )
+        fixture.runner.speculator._tree_confidence_source = "base_full_vocab"
         fixture.validate(fixture.runner)
         self.assertFalse(fixture.facts["graph_admitted"])
         with self.assertRaisesRegex(ValueError, "eager"):
@@ -91,9 +100,28 @@ class Admission(unittest.TestCase):
         cfg.compilation_config.cudagraph_capture_sizes = [1, 9, 17, 25, 33, 41, 49, 57, 65]
         self.assertTrue(prefix.prefix_graph_configured(cfg))
 
+    def test_multiple_requests_tp_and_more_than_nine_gears(self):
+        cfg = config()
+        cfg.scheduler_config.max_num_seqs = 3
+        cfg.parallel_config.tensor_parallel_size = 4
+        cfg.compilation_config.cudagraph_capture_sizes = list(range(2, 17))
+        self.assertTrue(prefix.prefix_graph_configured(cfg))
+        self.assertEqual(prefix.prefix_capture_sizes(cfg), [1, *range(2, 17), 65])
+        self.assertEqual(len(prefix.prefix_capture_shapes(cfg)), 3 * 17)
+
+    def test_base_and_qwen_dspark_graph_admission(self):
+        cfg = config()
+        cfg.additional_config["tree_spec_config"]["verification_confidence_source"] = "base_full_vocab"
+        cfg.speculative_config.use_dspark = lambda: True
+        cfg.speculative_config.draft_model_config.hf_config = NS(architectures=["Qwen3DSparkModel"])
+        self.assertTrue(prefix.prefix_graph_configured(cfg))
+        cfg.speculative_config.draft_model_config.hf_config.architectures = ["unknown"]
+        self.assertFalse(prefix.prefix_graph_configured(cfg))
+
     def test_unsupported_runtime_rejected(self):
         changes = [
-            ("scheduler_config.max_num_seqs", 2),
+            ("scheduler_config.max_num_seqs", 0),
+            ("scheduler_config.max_num_batched_tokens", 64),
             ("scheduler_config.async_scheduling", True),
             ("model_config.enforce_eager", True),
             ("speculative_config.enforce_eager", True),
@@ -104,7 +132,9 @@ class Admission(unittest.TestCase):
             ("speculative_config.enable_adaptive_verification", True),
             ("model_config.hf_config.model_type", "other"),
         ]
-        changes += [("parallel_config." + key, 2) for key in vars(config().parallel_config)]
+        changes += [
+            ("parallel_config." + key, 2) for key in vars(config().parallel_config) if key != "tensor_parallel_size"
+        ]
         for path, value in changes:
             with self.subTest(path=path):
                 cfg = config()
@@ -118,13 +148,10 @@ class Admission(unittest.TestCase):
     def test_invalid_gears_rejected(self):
         for gears in (
             [],
-            [17, 65],
-            [1, 17],
             [1, 17, 65, 65],
             [1, 17, 66],
             [True, 65],
             [1, 17.0, 65],
-            list(range(1, 66)),
         ):
             with self.subTest(gears=gears):
                 cfg = config()
@@ -136,13 +163,12 @@ class Admission(unittest.TestCase):
             ("enabled", False),
             ("budget", True),
             ("budget", 0),
-            ("verification_confidence_source", "base_full_vocab"),
+            ("verification_confidence_source", "unknown"),
         ]:
             cfg = config()
             cfg.additional_config["tree_spec_config"][key] = value
             self.assertFalse(prefix.prefix_graph_configured(cfg))
         for data in (
-            {},
             {"projector_type": "other", "shift_label": True},
             {"projector_type": "domino", "shift_label": False},
         ):
@@ -154,7 +180,9 @@ class Admission(unittest.TestCase):
         for capacity in [1, 17, 33, 49, 65]:
             for q in range(1, capacity + 1):
                 self.assertEqual(prefix.prefix_shape([q], 1, capacity), (1, q))
-        for args in [([], 1, 65), ([0], 1, 65), ([66], 1, 65), ([1, 2], 2, 65), ([True], 1, 65), ([1.0], 1, 65)]:
+        self.assertEqual(prefix.prefix_shape([1, 2], 2, 65), (2, 1))
+        self.assertEqual(prefix.prefix_query_lens([1, 18], 2, 17), [1, 17])
+        for args in [([], 1, 65), ([0], 1, 65), ([66], 1, 65), ([2, 1], 2, 65), ([True], 1, 65), ([1.0], 1, 65)]:
             with self.assertRaises(ValueError):
                 prefix.prefix_shape(*args)
 
@@ -198,7 +226,7 @@ class LegacyDraftIntegration(unittest.TestCase):
             with self.subTest(legacy=legacy, prefix=enabled):
                 cfg = config()
                 if not enabled:
-                    cfg.scheduler_config.max_num_seqs = 2
+                    cfg.scheduler_config.async_scheduling = True
                 calls = []
                 padded = []
                 tensor = NS(zero_=lambda: None, fill_=lambda value: None)
@@ -258,7 +286,7 @@ class LegacyDraftIntegration(unittest.TestCase):
         for legacy, enabled in [(True, True), (True, False), (False, True)]:
             cfg = config()
             if not enabled:
-                cfg.scheduler_config.max_num_seqs = 2
+                cfg.scheduler_config.async_scheduling = True
             replayed = []
             speculator = NS(
                 _draft_graph_used=False,
@@ -300,6 +328,12 @@ class ReplayContracts(unittest.TestCase):
                 return None
 
         method = RemoveImports().visit(method)
+        reshape = copy.deepcopy(
+            next(
+                n for n in owner.body if isinstance(n, ast.FunctionDef) and n.name == "_reshape_tree_verify_full_descs"
+            )
+        )
+        reshape = RemoveImports().visit(reshape)
         modes = NS(FULL="full", NONE="none")
 
         class Parent:
@@ -314,7 +348,7 @@ class ReplayContracts(unittest.TestCase):
             name="UnderTest",
             bases=[ast.Name(id="Parent", ctx=ast.Load())],
             keywords=[],
-            body=[method],
+            body=[method, reshape],
             decorator_list=[],
         )
         code = ast.Module(
@@ -324,6 +358,9 @@ class ReplayContracts(unittest.TestCase):
         namespace = dict(
             Parent=Parent,
             prefix_graph_configured=prefix.prefix_graph_configured,
+            prefix_capture_sizes=prefix.prefix_capture_sizes,
+            prefix_capture_shapes=prefix.prefix_capture_shapes,
+            TreeShape=NS(from_config=lambda cfg: NS(target_query_len=65)),
             CUDAGraphMode=modes,
             BatchExecutionDescriptor=NS,
         )
@@ -335,6 +372,9 @@ class ReplayContracts(unittest.TestCase):
         manager.tree_prefix_decode = True
         manager.parent_calls = 0
         manager.override = None
+        manager._capture_descs = {modes.FULL: [NS(num_tokens=65)]}
+        manager._candidates = {}
+        manager._reshape_tree_verify_full_descs()
         return manager
 
     def test_dispatch_selects_smallest_graph_for_every_query(self):
@@ -355,10 +395,31 @@ class ReplayContracts(unittest.TestCase):
             self.assertEqual(actual.num_tokens, 73)
         self.assertEqual(manager.parent_calls, 0)
 
+    def test_batch_descriptor_uses_longest_real_query_not_total_divided_by_bs(self):
+        manager = self.manager()
+        manager.vllm_config.scheduler_config.max_num_seqs = 2
+        manager._reshape_tree_verify_full_descs()
+        actual = manager.dispatch(2, 34, None, 0, max_query_len=33)
+        self.assertEqual((actual.num_reqs, actual.num_tokens, actual.max_query_len), (2, 66, 33))
+        roots = manager.dispatch(2, 2, None, 0, max_query_len=1)
+        self.assertEqual((roots.num_reqs, roots.num_tokens), (2, 2))
+
+    def test_equal_total_sizes_keep_both_real_bs_descriptors(self):
+        manager = self.manager()
+        manager.vllm_config.scheduler_config.max_num_seqs = 3
+        manager.vllm_config.compilation_config.cudagraph_capture_sizes = [1, 3, 65]
+        manager._reshape_tree_verify_full_descs()
+        shapes = {(d.num_reqs, d.num_tokens // d.num_reqs) for d in manager._capture_descs["full"]}
+        self.assertEqual(len(shapes), 9)
+        self.assertIn((1, 3), shapes)
+        self.assertIn((3, 1), shapes)
+
     def test_dispatch_rejects_wrong_gears_or_request_layout(self):
         manager = self.manager()
         for mode, capacity, requests in [("none", 17, 1), ("full", 65, 1), ("full", 17, 2)]:
-            manager.override = NS(cg_mode=mode, num_tokens=capacity, num_reqs=requests)
+            manager._capture_descs["full"] = [
+                NS(cg_mode=mode, num_tokens=capacity, num_reqs=requests, max_query_len=capacity)
+            ]
             with self.subTest(mode=mode, capacity=capacity, requests=requests), self.assertRaises(RuntimeError):
                 manager.dispatch(1, 13, None, 0)
         manager.override = None
@@ -369,7 +430,7 @@ class ReplayContracts(unittest.TestCase):
     def test_fia_provider_rebinds_real_query_and_kv_lengths(self):
         mask = NS(ndim=4)
         backend = NS(_bsnd_tree_attn_mask=lambda value, requests, capacity: (value, requests, capacity))
-        ns = dict(prefix_shape=prefix.prefix_shape, AscendAttentionBackendImpl=backend)
+        ns = dict(prefix_query_lens=prefix.prefix_query_lens, AscendAttentionBackendImpl=backend)
         resolve = LegacyDraftIntegration.method(
             "vllm_ascend/attention/attention_v1.py", "TreeFIAParamProvider", "resolve", ns
         )
@@ -408,7 +469,11 @@ class ReplayContracts(unittest.TestCase):
 
     def test_query_padding_preserves_single_real_request(self):
         modes = NS(FULL="full")
-        ns = dict(prefix_graph_configured=prefix.prefix_graph_configured, CUDAGraphMode=modes)
+        ns = dict(
+            prefix_graph_configured=prefix.prefix_graph_configured,
+            prefix_shape=prefix.prefix_shape,
+            CUDAGraphMode=modes,
+        )
         pad = LegacyDraftIntegration.method(
             "vllm_ascend/worker/v2/model_runner.py", "NPUModelRunner", "_pad_query_start_loc_for_fia", ns
         )
@@ -423,6 +488,47 @@ class ReplayContracts(unittest.TestCase):
         for requests, query_start in [(2, [0, 1, 2]), (1, [0, 0]), (1, [0, 66])]:
             with self.assertRaises(ValueError):
                 pad(obj, 65, requests, requests, query_start, modes.FULL)
+
+    def test_provider_and_padding_keep_ragged_requests_and_existing_device_boundaries(self):
+        modes = NS(FULL="full")
+        backend = NS(_bsnd_tree_attn_mask=lambda *args: args)
+        namespace = dict(
+            prefix_graph_configured=prefix.prefix_graph_configured,
+            prefix_shape=prefix.prefix_shape,
+            prefix_query_lens=prefix.prefix_query_lens,
+            CUDAGraphMode=modes,
+            AscendAttentionBackendImpl=backend,
+        )
+        pad = LegacyDraftIntegration.method(
+            "vllm_ascend/worker/v2/model_runner.py", "NPUModelRunner", "_pad_query_start_loc_for_fia", namespace
+        )
+        resolve = LegacyDraftIntegration.method(
+            "vllm_ascend/attention/attention_v1.py", "TreeFIAParamProvider", "resolve", namespace
+        )
+        cfg = config()
+        cfg.scheduler_config.max_num_seqs = 2
+        device_boundaries = object()
+        for lengths in ([33, 1], [1, 33], [1, 1], [13, 29]):
+            cumulative = [lengths[0], sum(lengths)]
+            starts = [0, *cumulative]
+            actual, requests = pad(NS(vllm_config=cfg), 66, 2, 2, starts, modes.FULL)
+            self.assertIs(actual, starts)
+            self.assertEqual(requests, 2)
+            metadata = NS(
+                actual_seq_lengths_q=cumulative,
+                num_decodes=2,
+                num_prefills=0,
+                attn_mask=NS(ndim=4),
+                seq_lens_list=[40 + lengths[0], 70 + lengths[1]],
+                block_tables=None,
+                query_start_loc_gpu=device_boundaries,
+            )
+            params = resolve(NS(layer_name="layer", num_decodes=2, query_len=33, prefix_gear=True), {"layer": metadata})
+            self.assertEqual(params["actual_seq_lengths"], list(lengths))
+            self.assertEqual(params["actual_seq_lengths_kv"], metadata.seq_lens_list)
+            self.assertIs(params["query_start_loc"], device_boundaries)
+        with self.assertRaises(ValueError):
+            pad(NS(vllm_config=cfg), 66, 2, 2, [0, 34, 35], modes.FULL)
 
 
 class TensorMasks(unittest.TestCase):

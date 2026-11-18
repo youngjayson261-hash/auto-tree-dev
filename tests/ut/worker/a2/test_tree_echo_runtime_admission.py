@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from transformers import Qwen3Config
 from vllm.config import set_current_vllm_config
 from vllm.engine.arg_utils import EngineArgs
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
@@ -19,17 +20,47 @@ from vllm_ascend.worker.v2.spec_decode.tree.speculator import AscendTreeSpeculat
 
 
 @pytest.fixture(scope="module")
-def runtime_config():
-    # Real 0.31 configuration construction, without loading any weights.
+def runtime_config(tmp_path_factory):
+    # Real configuration construction without weights or machine-local paths.
+    # Only the model metadata is needed by this host-side runtime guard.
+    directory = tmp_path_factory.mktemp("echo_runtime_config")
+    target, draft = directory / "target", directory / "draft"
+    target.mkdir()
+    draft.mkdir()
+    config = Qwen3Config(
+        vocab_size=151936,
+        hidden_size=4096,
+        intermediate_size=12288,
+        num_hidden_layers=36,
+        num_attention_heads=32,
+        num_key_value_heads=8,
+        head_dim=128,
+        max_position_embeddings=40960,
+    )
+    config.architectures = ["Qwen3ForCausalLM"]
+    config.to_json_file(target / "config.json")
+    config.architectures = ["DFlashDraftModel"]
+    config.num_hidden_layers = 5
+    config.layer_types = config.layer_types[:5]
+    config.block_size = 16
+    config.num_target_layers = 36
+    config.dflash_config = dict(
+        projector_type="domino",
+        shift_label=True,
+        pure_draft_prefix_len=1,
+        mask_token_id=151669,
+        target_layer_ids=[1, 9, 17, 25, 33],
+    )
+    config.to_json_file(draft / "config.json")
     return EngineArgs(
-        model="/mnt/share/weight/Qwen3-8B",
+        model=str(target),
         enforce_eager=True,
         async_scheduling=False,
         tensor_parallel_size=1,
         max_model_len=256,
         max_num_seqs=4,
         max_num_batched_tokens=256,
-        speculative_config={"model": "/mnt/share/weight/Qwen3-8B-Domino-b16", "num_speculative_tokens": 16},
+        speculative_config={"method": "dflash", "model": str(draft), "num_speculative_tokens": 16},
         additional_config={"tree_spec_config": {"enabled": True, "budget": 48, "topk": 8}},
     ).create_engine_config()
 
@@ -172,7 +203,6 @@ def test_bool_threshold_rejected(value):
 @pytest.mark.parametrize(
     "field",
     [
-        "tensor_parallel_size",
         "pipeline_parallel_size",
         "data_parallel_size",
         "prefill_context_parallel_size",
@@ -183,6 +213,12 @@ def test_real_parallel_gate(runtime_config, monkeypatch, field):
     monkeypatch.setattr(runtime_config.parallel_config, field, 2)
     with pytest.raises(ValueError, match="confidence"):
         make_runner(runtime_config)._validate_tree_confidence_runtime()
+
+
+@pytest.mark.parametrize("size", [1, 2, 4])
+def test_real_tensor_parallel_admission(runtime_config, monkeypatch, size):
+    monkeypatch.setattr(runtime_config.parallel_config, "tensor_parallel_size", size)
+    make_runner(runtime_config)._validate_tree_confidence_runtime((SamplingParams(temperature=0),))
 
 
 @pytest.mark.parametrize(

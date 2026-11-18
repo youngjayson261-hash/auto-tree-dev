@@ -1,0 +1,16 @@
+pr: 1
+entries:
+  - category: feature
+    text: >-
+      Extended experimental ECHO confidence adapters to mapped Markov and
+      DFlash2 Scorer candidates, and bounded Qwen3 prefix FULL graphs to real
+      multi-request TP batches with request-count and per-request-capacity
+      capture keys. Capture endpoints are inserted automatically and the
+      previous nine-size limit is removed; model-level acceptance remains
+      specific to each tested configuration.
+  - category: config
+    text: >-
+      Added opt-in verification_eager_pad_to_full_tree for eager Qwen hybrid
+      targets with DFlash2 Scorer confidence. This retains full-tree physical
+      verification capacity while preserving real candidate counts; padded
+      transformer rows still incur computation and hybrid FULL remains unsupported.

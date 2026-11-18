@@ -110,9 +110,11 @@ class TestBudgetPolicy(unittest.TestCase):
         self.assertFalse(policy.admit_confidence_scorer(Domino, Independent, True))
         self.assertFalse(policy.admit_confidence_scorer(Independent, Independent, False))
         policy.validate_runtime_facts(**runtime_facts())
+        for tp in (2, 4):
+            policy.validate_runtime_facts(**runtime_facts(tp=tp))
         invalid = dict(
             async_scheduling=True,
-            tp=2,
+            tp=0,
             pp=2,
             dp=2,
             pcp=2,
@@ -132,7 +134,7 @@ class TestBudgetPolicy(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 policy.validate_runtime_facts(**runtime_facts(**{key: value}))
         with self.assertRaisesRegex(ValueError, "async_scheduling,parallelism"):
-            policy.validate_runtime_facts(**runtime_facts(async_scheduling=True, tp=2))
+            policy.validate_runtime_facts(**runtime_facts(async_scheduling=True, tp=0))
 
     def test_batch_fallback_only_changes_confidence_rows(self):
         rows = [example_row(), example_row(invalid_scores=True), example_row(bootstrap=True)]

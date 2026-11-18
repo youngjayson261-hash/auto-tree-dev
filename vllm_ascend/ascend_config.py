@@ -543,7 +543,8 @@ class AscendConfig:
                 "keep_origin_chain": false,
                 "verification_policy": "fixed",
                 "verification_threshold": 0.0,
-                "verification_confidence_source": "base_full_vocab"
+                "verification_confidence_source": "base_full_vocab",
+                "verification_eager_pad_to_full_tree": false
             },
             "sparse_kv_offload_config": {
                 "enabled": false,
@@ -1345,6 +1346,9 @@ class TreeSpecConfig:
     verification_policy: str = "fixed"
     verification_threshold: float = 0.0
     verification_confidence_source: str = "base_full_vocab"
+    # Keep eager hybrid verification matrix shapes at the full-tree capacity.
+    # Published candidates and attention/GDN request lengths remain unpadded.
+    verification_eager_pad_to_full_tree: bool = False
 
     @property
     def confidence_verification_requested(self) -> bool:
@@ -1369,6 +1373,10 @@ class TreeSpecConfig:
 
     @model_validator(mode="after")
     def _validate(self):
+        if self.verification_eager_pad_to_full_tree and (
+            not self.confidence_verification_requested or self.verification_confidence_source != "scorer_logprob"
+        ):
+            raise ValueError("verification_eager_pad_to_full_tree requires enabled Scorer confidence verification")
         if self.verification_confidence_source not in ("base_full_vocab", "scorer_logprob"):
             raise ValueError("verification_confidence_source must be base_full_vocab or scorer_logprob")
         if self.enabled and (self.budget is None or self.topk is None):
@@ -1397,6 +1405,19 @@ class TreeSpecConfig:
             raise ValueError("Tree speculation requires a DSpark or DFlash draft model")
         if self.budget < spec.num_speculative_tokens:
             raise ValueError("tree_spec_config.budget must be >= num_speculative_tokens")
+        if self.verification_eager_pad_to_full_tree:
+            target = vllm_config.model_config
+            draft_hf = spec.draft_model_config.hf_config
+            if (
+                not target.enforce_eager
+                or not spec.enforce_eager
+                or getattr(target.hf_config, "model_type", None) not in ("qwen3_5", "qwen3_5_moe", "qwen3_next")
+                or "DFlash2DraftModel" not in (getattr(draft_hf, "architectures", None) or [])
+            ):
+                raise ValueError("verification_eager_pad_to_full_tree requires an eager Qwen hybrid target and DFlash2")
+            scheduler = vllm_config.scheduler_config
+            if scheduler.max_num_batched_tokens < scheduler.max_num_seqs * (self.budget + 1):
+                raise ValueError("eager tree padding requires max_num_batched_tokens >= max_num_seqs * (budget + 1)")
 
 
 @config

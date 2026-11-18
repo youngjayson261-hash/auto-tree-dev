@@ -1,5 +1,11 @@
 # Experimental bounded FULL graphs for the Domino tree scorer
 
+The working branch now extends these original constraints through the
+[ECHO compatibility adapters](echo-compatibility-41.md): real multi-request
+TP batches, additional scoring paths and a two-dimensional capture grid.
+The configuration and experimental results below describe the original
+single-request implementation; retain their original acceptance boundaries.
+
 The Qwen3 Domino tree scorer can capture a small set of Target verification
 graphs and replay the smallest graph that fits the current tree. The real
 query length `q` remains the root plus the actual verified nodes; graph

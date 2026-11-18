@@ -77,10 +77,12 @@ from vllm_ascend.device.device_op import DeviceOperator
 from vllm_ascend.device.hardware_profile import HardwareCapability, get_current_hardware_profile
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.attention_fence import attention_transfer_window
 from vllm_ascend.ops.triton.spec_decode.tree.kv_transport import gather_tree_cache_rows
+from vllm_ascend.ops.triton.spec_decode.tree.query_packing import transfer_tree_queries
 from vllm_ascend.utils import MINIMAX_M3_FP8_KV_CACHE_BLOCK_SIZE, is_minimax_m3_fp8_kv_cache, vllm_version_is
 from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
     prefix_capture_active,
     prefix_graph_configured,
+    prefix_query_lens,
     prefix_shape,
 )
 
@@ -609,6 +611,21 @@ def _tree_fia_paged_cache_out(*, key, value, block_table, dense_key, dense_value
     )
 
 
+def _tree_fia_prefix_out(*, query, packed_query, flat_output, query_start_loc, **kwargs):
+    """Re-record ragged packing, FIA and unpacking as one updatable task.
+
+    The graph owns fixed BSND buffers. Only real per-request lengths change;
+    the original TND order, positions, KV addresses and request count do not.
+    Device boundary driven transfers keep the launch grid fixed during updates.
+    """
+    transfer_tree_queries(query, query_start_loc, packed_query, unpack=False)
+    if "dense_key" in kwargs:
+        _tree_fia_paged_cache_out(query=packed_query, **kwargs)
+    else:
+        torch_npu.npu_fused_infer_attention_score.out(query=packed_query, **kwargs)
+    transfer_tree_queries(flat_output, query_start_loc, kwargs["out"][0], unpack=True)
+
+
 @dataclass(frozen=True, slots=True)
 class TreeFIAParamProvider:
     layer_name: str | None
@@ -620,16 +637,19 @@ class TreeFIAParamProvider:
         metadata = attn_metadata[self.layer_name]
         actual_queries = [self.query_len] * self.num_decodes
         if self.prefix_gear:
-            _, q = prefix_shape(metadata.actual_seq_lengths_q, metadata.num_decodes, self.query_len)
+            if metadata.num_decodes != self.num_decodes:
+                raise RuntimeError("prefix graph replay cannot add or remove real requests")
+            actual_queries = prefix_query_lens(metadata.actual_seq_lengths_q, metadata.num_decodes, self.query_len)
             if metadata.num_prefills != 0 or metadata.attn_mask is None or metadata.attn_mask.ndim != 4:
                 raise RuntimeError("prefix graph replay requires real tree decode metadata")
-            actual_queries = [q]
         lengths = list(metadata.seq_lens_list[: self.num_decodes])
         lengths += [1] * (self.num_decodes - len(lengths))
         params = {
             "actual_seq_lengths": actual_queries,
             "actual_seq_lengths_kv": lengths,
         }
+        if self.prefix_gear and self.num_decodes > 1:
+            params["query_start_loc"] = metadata.query_start_loc_gpu
         if metadata.attn_mask is not None:
             params["atten_mask"] = AscendAttentionBackendImpl._bsnd_tree_attn_mask(
                 metadata.attn_mask, self.num_decodes, self.query_len
@@ -959,17 +979,31 @@ class AscendAttentionBackendImpl(AttentionImpl):
         if prefix_gear:
             if attn_metadata.num_prefills != 0 or attn_metadata.attn_mask is None or attn_metadata.attn_mask.ndim != 4:
                 raise RuntimeError("prefix graph capture requires a real tree mask")
-            physical_q = query.shape[0]
-            prefix_shape(attn_metadata.actual_seq_lengths_q, attn_metadata.num_decodes, physical_q)
+            rows = attn_metadata.num_decodes
+            if rows < 1 or query.shape[0] % rows:
+                raise ValueError("physical prefix graph rows must fit its real request count")
+            physical_q = query.shape[0] // rows
+            prefix_shape(attn_metadata.actual_seq_lengths_q, rows, physical_q)
             if not 1 <= physical_q <= attn_metadata.attn_mask.shape[-2]:
                 raise ValueError("physical tree graph exceeds mask capacity")
-            bsnd = (1, physical_q)
+            bsnd = (rows, physical_q)
         if bsnd is None:
             raise RuntimeError("Ragged tree decode requires eager execution; ragged graph capture is unsupported")
         num_decodes, q_len = bsnd
-        fia_query = query[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
-        fia_output = output[: num_decodes * q_len].view(num_decodes, q_len, self.num_heads, self.head_size)
-        actual_seq_lengths_q = attn_metadata.actual_seq_lengths_q if prefix_gear else [q_len] * num_decodes
+        flat_query = query[: num_decodes * q_len].view(num_decodes * q_len, self.num_heads, self.head_size)
+        flat_output = output[: num_decodes * q_len].view_as(flat_query)
+        packed_prefix = prefix_gear and num_decodes > 1
+        fia_query = (
+            query.new_empty((num_decodes, q_len, self.num_heads, self.head_size))
+            if packed_prefix
+            else flat_query.view(num_decodes, q_len, self.num_heads, self.head_size)
+        )
+        fia_output = torch.empty_like(fia_query) if packed_prefix else flat_output.view_as(fia_query)
+        actual_seq_lengths_q = (
+            prefix_query_lens(attn_metadata.actual_seq_lengths_q, num_decodes, q_len)
+            if prefix_gear
+            else [q_len] * num_decodes
+        )
         if isinstance(actual_seq_lengths_kv, torch.Tensor):
             actual_seq_lengths_kv = actual_seq_lengths_kv[:num_decodes]
         else:
@@ -1023,8 +1057,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
         if paged_kwargs is not None:
             operation = _tree_fia_paged_cache_out
             op_kwargs.update(paged_kwargs)
+        if packed_prefix:
+            operation = _tree_fia_prefix_out
+            op_kwargs.update(
+                query=flat_query,
+                packed_query=fia_query,
+                flat_output=flat_output,
+                query_start_loc=attn_metadata.query_start_loc_gpu,
+            )
         register_task(operation, op_kwargs, TreeFIAParamProvider(self._layer_name, num_decodes, q_len, prefix_gear))
-        return output.view(num_tokens, self.num_heads, self.head_size), num_tokens
+        return output[:num_tokens].view(num_tokens, self.num_heads, self.head_size), num_tokens
 
     def full_graph_fia_v2(
         self,

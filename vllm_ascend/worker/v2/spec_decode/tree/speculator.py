@@ -520,7 +520,10 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
     def _bind_correction_heads(self, target_model: nn.Module) -> None:
         """Bind model scoring heads once, then create the common tree builder."""
         from vllm_ascend.worker.v2.spec_decode.tree.scoring import (
+            DFlash2Scorer,
             DominoCorrectionScorer,
+            MarkovScorer,
+            validate_confidence_vocabulary,
         )
 
         model = self.model
@@ -551,6 +554,12 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             keep_origin_chain=self.keep_origin_chain,
         )
         if self._tree_budget_enabled:
+            scorer = self.tree_builder.scorer
+            if type(scorer) in (MarkovScorer, DFlash2Scorer):
+                self._tree_full_vocab_size = validate_confidence_vocabulary(
+                    model, scorer, self.vocab_size, self._tree_confidence_source
+                )
+                self._tree_mapped_confidence_proven = True
             tree_vocab_size = (
                 model.config.draft_vocab_size
                 if self.draft_backend == "dspark" and not self._dsv4_dspark_draft
@@ -560,7 +569,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             self._tree_confidence_metadata = confidence_source_metadata(
                 source=self._tree_confidence_source,
                 scorer_name=scorer.name,
-                candidate_size=getattr(scorer, "candidate_size", None),
+                candidate_size=getattr(scorer, "candidate_size", getattr(scorer, "top_k", None)),
                 prefix_len=getattr(scorer, "prefix_len", 0),
                 width=self.tree_builder._frontier_width(tree_vocab_size),
                 vocab_size=tree_vocab_size,
@@ -869,7 +878,10 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             logits = self.model.compute_logits(sample_hidden_states)
         logits = logits.view(num_reqs, self.num_speculative_steps, -1)
         if self._tree_budget_enabled:
-            if draft_candidate_ids is not None or logits.shape[-1] != self._tree_full_vocab_size:
+            if draft_candidate_ids is not None:
+                if self._tree_confidence_source != "scorer_logprob" or self.tree_builder.scorer.name != "dflash2":
+                    raise ValueError("candidate-lattice confidence requires the DFlash2 scorer source")
+            elif logits.shape[-1] != self._tree_full_vocab_size:
                 raise ValueError("confidence requires full base-vocabulary logits")
         if draft_candidate_ids is not None:
             draft_candidate_ids = draft_candidate_ids.view(num_reqs, self.num_speculative_steps, -1)

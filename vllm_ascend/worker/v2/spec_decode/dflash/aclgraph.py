@@ -90,7 +90,16 @@ class DFlashAclGraphManager(DFlashCudaGraphManager):
             set_draft_graph_params(self.capture_sizes)
 
     def _init_candidates(self) -> None:
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
         orig = self.compilation_config.cudagraph_capture_sizes
+        original_max = self.compilation_config.max_cudagraph_capture_size
+        if prefix_graph_configured(self.vllm_config):
+            # Target gears are per request. Draft must still capture every real
+            # request count, even when R*K exceeds the largest configured gear.
+            self.compilation_config.max_cudagraph_capture_size = max(
+                original_max or 0, self.max_num_reqs * self.decode_query_len
+            )
         self.compilation_config.cudagraph_capture_sizes = merge_draft_aclgraph_capture_sizes(
             orig,
             self.decode_query_len,
@@ -101,6 +110,7 @@ class DFlashAclGraphManager(DFlashCudaGraphManager):
             super()._init_candidates()
         finally:
             self.compilation_config.cudagraph_capture_sizes = orig
+            self.compilation_config.max_cudagraph_capture_size = original_max
 
     def capture(
         self,
