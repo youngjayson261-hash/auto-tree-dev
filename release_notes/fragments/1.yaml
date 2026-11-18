@@ -1,4 +1,4 @@
-# Move to the actual numbered fragment and add pr when a PR is assigned.
+pr: 1
 entries:
   - category: feature
     text: >-
