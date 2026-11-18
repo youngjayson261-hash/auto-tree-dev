@@ -16,6 +16,7 @@ from vllm_ascend.utils import vllm_version_is
 from vllm_ascend.worker.v2.spec_decode.dflash.speculator import (
     AscendDFlashSpeculator,
 )
+from vllm_ascend.worker.v2.spec_decode.tree.budget_graph import SelectorBinding, TreeBudgetSelectorGraphRunner
 from vllm_ascend.worker.v2.spec_decode.tree.budget_metrics import TreeBudgetStats
 from vllm_ascend.worker.v2.spec_decode.tree.budget_policy import (
     PolicyStatus,
@@ -90,6 +91,7 @@ class _TreeBudgetRuntime:
         self._summary = None
         self._summary_views = {}
         self.bootstrap_mask = None
+        self._selector_graph_runner = None
         if tau > 0:
             self._summary = TreeScoreSummary(
                 torch.empty((capacity, max_depth), dtype=torch.float32, device=device),
@@ -119,11 +121,32 @@ class _TreeBudgetRuntime:
             self.bootstrap_mask[:num_reqs].copy_(source[:num_reqs], non_blocking=True)
         self._batch_rows = num_reqs
 
+    def prepare_selector_graph(self, layout, packet_out: torch.Tensor, num_reqs: int, *, pool) -> bool:
+        self._check_rows(num_reqs)
+        if self.tau == 0 or num_reqs == 0:
+            return False
+        if packet_out.ndim != 2 or packet_out.shape[0] < num_reqs or packet_out.shape[1] != 2:
+            raise ValueError("tree packet must provide the explicitly prepared rows")
+        if packet_out.stride() != (2, 1):
+            raise ValueError("runtime tree packet must preserve row stride 2 and column stride 1")
+        if self._selector_graph_runner is None:
+            self._selector_graph_runner = TreeBudgetSelectorGraphRunner()
+        binding = SelectorBinding(
+            layout, self.score_summary(num_reqs), self.bootstrap_mask, packet_out[:num_reqs], self.tau
+        )
+        return self._selector_graph_runner.prepare(binding, pool=pool)
+
     def publish(self, layout, packet_out: torch.Tensor) -> None:
         if packet_out.ndim != 2 or packet_out.shape != (self._batch_rows, 2):
             raise ValueError("tree packet must match the current active batch")
         if packet_out.stride() != (2, 1):
             raise ValueError("runtime tree packet must preserve row stride 2 and column stride 1")
+        if self._selector_graph_runner is not None:
+            binding = SelectorBinding(
+                layout, self.score_summary(packet_out.shape[0]), self.bootstrap_mask, packet_out, self.tau
+            )
+            if self._selector_graph_runner.try_replay(binding):
+                return
         select_tree_prefix_device(
             layout,
             self.score_summary(packet_out.shape[0]),
@@ -828,6 +851,24 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 missing = set(sizes) - self.tree_kv_compact._graphs.keys()
                 if missing:
                     raise RuntimeError(f"FULL DFlash2 tree KV compaction capture failed for batches {sorted(missing)}")
+        self._prepare_tree_budget_selector_graphs()
+
+    def _prepare_tree_budget_selector_graphs(self) -> None:
+        runtime = self._tree_budget_runtime
+        if runtime is None or runtime.tau == 0 or not self._tree_graphs:
+            return
+        from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
+        from vllm.platforms import current_platform
+
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+
+        if not prefix_graph_configured(self.vllm_config):
+            return
+        pool = current_platform.get_global_graph_pool()
+        for num_reqs in sorted(self._tree_graphs):
+            validate_cudagraph_capturing_enabled()
+            ready = runtime.prepare_selector_graph(self.tree, self.tree_budget_packet, num_reqs, pool=pool)
+            logger.info("Tree budget selector ACLGraph num_reqs=%s ready=%s", num_reqs, ready)
 
     def _draft_capture_num_reqs(self) -> list[int]:
         manager = self.query_cudagraph_manager
