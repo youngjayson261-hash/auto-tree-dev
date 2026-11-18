@@ -698,6 +698,7 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
         prev_path_node_ids: torch.Tensor | None = None,
         prev_num_sampled: torch.Tensor | None = None,
         row_widths: torch.Tensor | None = None,
+        tree_depths: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | tuple[None, None]:
         """Conv tap table of every draft-tree node and the committed history.
 
@@ -735,6 +736,11 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
             # tokens each request actually verifies.
             rows * (self.spec_conv_width - 1),
             row_widths=row_widths,
+            tree_depths=(
+                torch.index_select(tree_depths, 0, spec_sequence_indices)
+                if tree_depths is not None
+                else None
+            ),
         )
         prefix_src = compute_tree_prefix_source(
             torch.index_select(prev_path_node_ids, 0, spec_sequence_indices),
@@ -1053,6 +1059,7 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
         prev_path_node_ids: torch.Tensor | None = None,
         prev_num_sampled: torch.Tensor | None = None,
         shared_gdn_tree: "SharedGDNTreeMetadata | None" = None,
+        tree_depths: torch.Tensor | None = None,
     ) -> GDNAttentionMetadata:
         # Normalize FIA's full-width dummy queries before slicing requests:
         # its common token count may still include those inactive rows.
@@ -1303,6 +1310,7 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
                     prev_path_node_ids,
                     prev_num_sampled,
                     row_widths=spec_row_widths,
+                    tree_depths=tree_depths,
                 )
                 if spec_init_state_indices is not None and self.spec_conv_window_rows is not None:
                     # Same packing for the state pages: the recurrent op consumes
@@ -1564,6 +1572,7 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
         prev_path_node_ids: torch.Tensor | None = None,
         prev_num_sampled: torch.Tensor | None = None,
         shared_gdn_tree: "SharedGDNTreeMetadata | None" = None,
+        tree_depths: torch.Tensor | None = None,
     ) -> GDNAttentionMetadata:
         self._ensure_conv_index_buffers()
         self._ensure_conv_output_buffer()
@@ -1579,6 +1588,7 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
             prev_path_node_ids=prev_path_node_ids,
             prev_num_sampled=prev_num_sampled,
             shared_gdn_tree=shared_gdn_tree,
+            tree_depths=tree_depths,
         )
         if self._conv_output_buffer is not None:
             # Layers in this group consume the same decode rows in sequence.

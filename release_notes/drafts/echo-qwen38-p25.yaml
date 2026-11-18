@@ -4,3 +4,5 @@ entries:
     text: Added an experimental standalone ACLGraph for tree budget selection with binding checks and eager fallback; P19 mask caching is excluded.
   - category: feature
     text: Added guarded Qwen3.8 DFlash2 TP2 tree decoding and bounded FULL decode capture/dispatch for capacities 1, 9, 17, 25 and 33.
+  - category: performance
+    text: Reused existing tree depths for eligible cropped GDN decode metadata, preserving unsupported-path fallback.

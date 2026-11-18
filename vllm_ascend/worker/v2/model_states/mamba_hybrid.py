@@ -132,6 +132,8 @@ class AscendMambaHybridAttnMetadata(MambaHybridAttnMetadata):
         kwargs["tree_parents"] = _pad_batch_rows(self.tree_parents, num_reqs)
         if self.tree_num_nodes is not None:
             kwargs["tree_num_nodes"] = _pad_batch_rows(self.tree_num_nodes, num_reqs)
+        if self.tree_depths is not None:
+            kwargs["tree_depths"] = _pad_batch_rows(self.tree_depths, num_reqs)
         if self.tree_prev_path is not None and self.tree_prev_num_sampled is not None:
             kwargs["prev_path_node_ids"] = self.tree_prev_path[:num_reqs]
             kwargs["prev_num_sampled"] = self.tree_prev_num_sampled[:num_reqs]

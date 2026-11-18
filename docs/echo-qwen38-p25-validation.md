@@ -25,3 +25,15 @@ Frozen source manifest SHA256:
 This experimental snapshot excludes P19. It was the original baseline in the
 completed P25 formal comparison. Standalone NPU probes are manual diagnostics;
 their historical card defaults do not authorize running them on new resources.
+
+## 3. P25-A: reuse cropped decode depths
+
+Reuse the existing tree depth metadata for eligible cropped decode work instead
+of rebuilding it in every cache group. Retain the original fallback and physical
+state buffer semantics. The source delta is two production files and one CPU
+contract test, against candidate-v011.
+
+Frozen manifest SHA256:
+`58bcc65569595002c3ce6d1ee3a098879040865ce7a785ee3806eac5ce74f2e1`.
+Three FULL128 correctness cases and three historical profile256 cases passed.
+The later paired formal experiment includes this exact A implementation.
