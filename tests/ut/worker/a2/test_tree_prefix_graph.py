@@ -194,7 +194,7 @@ class LegacyDraftIntegration(unittest.TestCase):
         return namespace[name]
 
     def test_v031_capture_initializes_padding_before_real_context_callback(self):
-        for legacy, enabled in [(True, True), (True, False), (False, True)]:
+        for legacy, enabled in [(True, True), (True, False), (False, True), (False, False)]:
             with self.subTest(legacy=legacy, prefix=enabled):
                 cfg = config()
                 if not enabled:
@@ -206,7 +206,7 @@ class LegacyDraftIntegration(unittest.TestCase):
 
                 def capture(*args, legacy=legacy, enabled=enabled, padded=padded, manager=manager, **kwargs):
                     callback = kwargs.get("precompute_context_kv")
-                    if legacy and enabled:
+                    if legacy:
                         self.assertEqual(padded, [-1])
                         self.assertTrue(callable(callback))
                         callback(1)
@@ -240,6 +240,7 @@ class LegacyDraftIntegration(unittest.TestCase):
                     ),
                     _draft_hidden_buf=None,
                     _capture_tree_graphs=lambda: None,
+                    _prepare_tree_budget_selector_graphs=lambda: None,
                     tree_kv_compact=None,
                 )
                 ns = dict(
@@ -252,10 +253,10 @@ class LegacyDraftIntegration(unittest.TestCase):
                     "vllm_ascend/worker/v2/spec_decode/tree/speculator.py", "AscendTreeSpeculator", "capture", ns
                 )
                 fn(obj)
-                self.assertEqual(calls, [(0, 17)] if legacy and enabled else [])
+                self.assertEqual(calls, [(0, 17)] if legacy else [])
 
     def test_v031_draft_replay_marks_actual_graph_call(self):
-        for legacy, enabled in [(True, True), (True, False), (False, True)]:
+        for legacy, enabled in [(True, True), (True, False), (False, True), (False, False)]:
             cfg = config()
             if not enabled:
                 cfg.scheduler_config.max_num_seqs = 2

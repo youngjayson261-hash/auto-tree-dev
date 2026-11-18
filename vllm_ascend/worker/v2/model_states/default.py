@@ -47,6 +47,7 @@ from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.sparse_kv_offload_man
 from vllm_ascend.utils import should_skip_allreduce_across_dp_group
 from vllm_ascend.worker.v2.attn_utils import build_attn_metadata, ring_state_update_skipped
 from vllm_ascend.worker.v2.input_batch import AscendInputBatch
+from vllm_ascend.worker.v2.mrope import prepare_mrope_positions
 from vllm_ascend.worker.v2.spec_decode import dflash_tree_spec_enabled
 
 
@@ -388,7 +389,20 @@ class AscendModelState(DefaultModelState):
         return super().prepare_inputs_embeds(scheduled_encoder_inputs, input_batch, req_states)
 
     def prepare_inputs(self, input_batch, req_states) -> dict[str, Any]:
-        model_inputs = super().prepare_inputs(input_batch, req_states)
+        if (
+            self.rope_state is not None
+            and getattr(input_batch, "tree_depths", None) is not None
+            and getattr(input_batch, "slot_positions", None) is not None
+        ):
+            # The runner already separated depth-based RoPE from unique KV
+            # slots. Upstream's linear MRoPE preparation would discard depths.
+            model_inputs = {
+                "positions": prepare_mrope_positions(
+                    self.rope_state, input_batch, req_states, depth_positions=input_batch.positions
+                )
+            }
+        else:
+            model_inputs = super().prepare_inputs(input_batch, req_states)
         model_inputs.update(self.prepare_engram_inputs(input_batch, req_states))
         return model_inputs
 

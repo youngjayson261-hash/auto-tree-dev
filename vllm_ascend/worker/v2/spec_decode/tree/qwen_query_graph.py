@@ -65,6 +65,100 @@ def _tensor_view(tensor):
     return tensor.data_ptr(), tuple(tensor.shape), tuple(tensor.stride()), tensor.dtype, tensor.device
 
 
+def qwen_tree_query_graph_capacity(runner, input_batch, query_len):
+    """Return the captured physical gear for one real CPU-described query row.
+
+    This is a transport capability check, not proof that target GDN capture is
+    correct. Prefix rows require the *current* execution descriptor published
+    by the runner. A configured FULL mode or an unrelated captured graph is
+    insufficient. Missing proof keeps accepted-query transport eager.
+    """
+    if input_batch is None or input_batch.num_reqs != 1 or input_batch.has_prefill:
+        return None
+    if getattr(input_batch, "is_dummy", False):
+        return None
+    if input_batch.is_prefilling_np[:1].any() or input_batch.num_reqs_after_padding != 1:
+        return None
+    q, capacity = input_batch.num_tokens, input_batch.num_tokens_after_padding
+    if not 1 <= q <= capacity <= query_len:
+        return None
+    scheduled = input_batch.num_scheduled_tokens[:1]
+    qsl = input_batch.query_start_loc_np
+    if scheduled.shape != (1,) or not (scheduled == q).all():
+        return None
+    if qsl.shape != (2,) or qsl[0] != 0 or qsl[1] != q:
+        return None
+    manager = runner.cudagraph_manager
+    if manager is None or not manager._graphs_captured:
+        return None
+    prefix_runtime = False
+    config = getattr(runner, "vllm_config", None)
+    if config is not None:
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
+            prefix_graph_configured,
+            prefix_graph_runtime_proven,
+        )
+
+        prefix_configured = prefix_graph_configured(config)
+        hybrid = getattr(config.model_config.hf_config, "model_type", None) == "qwen3_5"
+        if prefix_configured:
+            tp_group = None
+            if hybrid:
+                from vllm.distributed import get_tp_group
+
+                tp_group = get_tp_group()
+            prefix_runtime = prefix_graph_runtime_proven(config, runner.speculator, tp_group)
+        if hybrid and (prefix_configured or getattr(manager, "tree_prefix_decode", False) or q != query_len):
+            if not prefix_runtime:
+                return None
+
+    def matches(desc):
+        return (
+            desc.cg_mode == CUDAGraphMode.FULL
+            and desc.num_reqs == 1
+            and desc.num_tokens == capacity
+            and (
+                desc.uniform_token_count == capacity
+                or (
+                    desc.uniform_token_count is None
+                    and prefix_runtime
+                    and getattr(manager, "tree_prefix_decode", False) is True
+                    and getattr(desc, "max_query_len", None) == capacity
+                )
+            )
+            and getattr(desc, "num_active_loras", 0) == 0
+            and getattr(desc, "num_ubatches", 1) == 1
+        )
+
+    plan = getattr(runner, "tree_verification_plan", None)
+    descriptor = None if plan is None else plan.get("graph_descriptor")
+    if plan is not None and plan.get("mixed_batch") is not None:
+        return None
+    if plan is not None and "graph_requested" in plan and plan["graph_requested"] is not True:
+        return None
+    if descriptor is not None and (
+        plan.get("graph_requested") is not True or descriptor not in manager.graphs or not matches(descriptor)
+    ):
+        return None
+    if getattr(manager, "tree_prefix_decode", False) or q != query_len:
+        if (
+            getattr(manager, "tree_prefix_decode", False) is not True
+            or descriptor is None
+            or plan.get("graph_requested") is not True
+        ):
+            return None
+        compilation = getattr(manager, "compilation_config", None)
+        gears = getattr(compilation, "cudagraph_capture_sizes", ())
+        if not gears or any(type(n) is not int or not 1 <= n <= query_len for n in gears):
+            return None
+        candidates = [n for n in gears if n >= q]
+        if not candidates or capacity != min(candidates):
+            return None
+    elif q != capacity:
+        return None
+    return capacity if any(matches(desc) for desc in manager.graphs) else None
+
+
 @dataclass
 class _QueryGraphEntry:
     graph: TreeQueryGraph
@@ -82,37 +176,18 @@ class QwenTreeQueryGraphs:
         self.stats = stats if stats is not None else TreeGraphStats()
         self.query_len = runner.speculator.tree_shape.target_query_len
         self.graphs = {}
+        self._capacity = None
 
     def eligible(self, input_batch):
-        # These fields are scheduler-owned CPU metadata, never device values.
-        if input_batch is None or input_batch.num_reqs != 1 or input_batch.has_prefill:
-            return False
-        if input_batch.is_prefilling_np[:1].any():
-            return False
-        if input_batch.num_tokens != self.query_len:
-            return False
-        if not (input_batch.num_scheduled_tokens[:1] == self.query_len).all():
-            return False
-        qsl = input_batch.query_start_loc_np
-        if qsl.shape != (2,) or qsl[1] - qsl[0] != self.query_len:
-            return False
-        # Configuring FULL is insufficient: its target output addresses must
-        # belong to a captured FULL gear, rather than fresh eager allocations.
-        manager = self.runner.cudagraph_manager
-        return (
-            manager is not None
-            and manager._graphs_captured
-            and any(
-                desc.cg_mode == CUDAGraphMode.FULL
-                and desc.num_reqs == 1
-                and desc.num_tokens == self.query_len
-                and desc.uniform_token_count == self.query_len
-                for desc in manager.graphs
-            )
-        )
+        # Clear the previous gear even when this batch is eager/prefill.
+        self._capacity = qwen_tree_query_graph_capacity(self.runner, input_batch, self.query_len)
+        return self._capacity is not None
 
     def compact_queries(self, tensors, qsl, acceptance, positions):
+        if self._capacity is None:
+            raise RuntimeError("Qwen tree query transport must be eligible for the current batch")
         key = (
+            self._capacity,
             tuple(_tensor_view(tensor) for tensor in tensors),
             _tensor_view(positions),
             _tensor_shape(qsl),

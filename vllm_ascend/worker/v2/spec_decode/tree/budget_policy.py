@@ -180,6 +180,36 @@ def confidence_source_metadata(
     """Describe the loaded score source using host-only model/config metadata."""
     if source not in ("base_full_vocab", "scorer_logprob"):
         raise ValueError("verification_confidence_source must be base_full_vocab or scorer_logprob")
+    if scorer_name == "dflash2":
+        if (
+            type(vocab_size) is not int
+            or type(candidate_size) is not int
+            or not 1 <= candidate_size <= vocab_size
+            or type(width) is not int
+            or not 1 <= width <= candidate_size
+        ):
+            raise ValueError("DFlash2 confidence metadata requires the actual selector lattice width")
+        native = source == "scorer_logprob"
+        return {
+            "source": source,
+            "scorer": scorer_name,
+            "threshold": threshold,
+            "score_semantics": "proposal_path_logprob",
+            "normalization_domain": "selector_lattice" if native else "base_full_vocab",
+            "normalization_size": candidate_size if native else vocab_size,
+            "selector_top_k": candidate_size,
+            "target_vocab_size": vocab_size,
+            "candidate_size_configured": candidate_size,
+            "candidate_size_effective": candidate_size,
+            "candidate_size_rule": "loaded candidate_selector.top_k",
+            "frontier_width": width,
+            "frontier_width_rule": "min(topk, selector_top_k)",
+            "prefix_len": 0,
+            "prefix_rule": "no prefix/suffix split",
+            "prefix_score_source": "dflash2_selector_lattice" if native else "base_full_vocab",
+            "suffix_score_source": "dflash2_selector_lattice" if native else "base_full_vocab",
+            "token_mapping_requirement": "target_vocab_ids",
+        }
     domino = scorer_name == "domino"
     effective_candidates = None
     if domino:
@@ -221,11 +251,17 @@ def validate_runtime_facts(
     processors_supported,
     scorer_admitted,
     graph_admitted=False,
+    tensor_parallel_proof=None,
 ):
     """Reject unsupported R1 confidence configurations with concrete reasons."""
+    parallel_ok = type(tp) is int and tp == 1
+    if type(tp) is int and tp == 2 and tensor_parallel_proof is not None:
+        from vllm_ascend.worker.v2.spec_decode.tree.confidence_admission import valid_tp2_confidence_proof
+
+        parallel_ok = valid_tp2_confidence_proof(tensor_parallel_proof)
     checks = (
         (not async_scheduling, "async_scheduling"),
-        (tp == 1 and pp == 1, "parallelism"),
+        (parallel_ok and type(pp) is int and pp == 1, "parallelism"),
         (type(dp) is int and dp == 1, "data_parallelism"),
         (all(type(size) is int and size == 1 for size in (pcp, dcp)), "context_parallelism"),
         (

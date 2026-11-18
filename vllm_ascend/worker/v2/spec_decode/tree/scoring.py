@@ -130,7 +130,27 @@ class DFlash2Scorer:
         self.predecessor_codebook = selector.predecessor_codebook
         self.successor_codebook = selector.successor_codebook
         self.hidden_projection = selector.hidden_projection
-        self.top_k = min(candidate_size, model.lm_head.org_vocab_size)
+        if type(selector.top_k) is not int:
+            raise ValueError("DFlash2 selector candidate width must be an integer")
+        self.top_k = selector.top_k
+        self.candidate_size = self.top_k
+        if self.top_k < 1 or self.predecessor_codebook.ndim != 2:
+            raise ValueError("DFlash2 selector requires a positive candidate width and two-dimensional codebooks")
+        if self.predecessor_codebook.shape != self.successor_codebook.shape:
+            raise ValueError("DFlash2 selector codebooks must share the target-vocabulary shape")
+        if self.predecessor_codebook.shape[1] < 1:
+            raise ValueError("DFlash2 selector codebook rank must be positive")
+        if self.top_k > self.predecessor_codebook.shape[0]:
+            raise ValueError("DFlash2 selector candidate width exceeds target vocabulary")
+
+    def confidence_metadata(self):
+        """Describe the native score domain using only host model metadata."""
+        return {
+            "normalization_domain": "selector_lattice",
+            "normalization_size": self.top_k,
+            "token_id_domain": "target_vocab",
+            "target_vocab_size": self.predecessor_codebook.shape[0],
+        }
 
     def reserve(self, num_reqs, num_nodes, device):
         del num_reqs, num_nodes, device
@@ -147,6 +167,14 @@ class DFlash2Scorer:
                 "DFlash2 candidate IDs and unary logits must have the same shape, "
                 f"got {tuple(candidate_ids.shape)} and {tuple(unary_logits.shape)}"
             )
+        if unary_logits.ndim != 3 or not unary_logits.is_floating_point():
+            raise ValueError("DFlash2 unary logits must be floating [requests, depth, candidates]")
+        if candidate_ids.dtype not in (torch.int32, torch.int64) or roots.dtype not in (torch.int32, torch.int64):
+            raise ValueError("DFlash2 candidate and root token IDs must be integral")
+        if roots.shape != (candidate_ids.shape[0],):
+            raise ValueError("DFlash2 roots must provide one target token ID per request")
+        if candidate_ids.device != unary_logits.device or roots.device != unary_logits.device:
+            raise ValueError("DFlash2 lattice and roots must share a device")
         if hidden is None or hidden.shape[:2] != candidate_ids.shape[:2]:
             raise ValueError("DFlash2 candidate lattice and draft hidden states have mismatched depth")
         if candidate_ids.shape[-1] != self.top_k:
@@ -180,8 +208,14 @@ class DFlash2Scorer:
         parent_ids = self._parent_token_ids(state, ctx)
         # Preserve CandidateSelector's arithmetic: multiply in the draft
         # dtype before the contraction, then add the FP32 unary logits.
-        predecessor = self.predecessor_codebook[parent_ids]
-        successor = self.successor_codebook[candidate_ids]
+        # index_select rejects negative IDs as well as IDs past the vocabulary;
+        # advanced indexing would silently wrap a negative token to the end.
+        predecessor = self.predecessor_codebook.index_select(0, parent_ids.reshape(-1)).view(
+            *parent_ids.shape, -1
+        )
+        successor = self.successor_codebook.index_select(0, candidate_ids.reshape(-1)).view(
+            *candidate_ids.shape, -1
+        )
         edge_scores = (
             torch.einsum("rpd,rkd->rpk", predecessor * hidden[:, None, :], successor) + unary_logits[:, None, :]
         )
