@@ -1,0 +1,4 @@
+# No PR number assigned; move to a numbered fragment when opening a PR.
+entries:
+  - category: feature
+    text: Added an experimental standalone ACLGraph for tree budget selection with binding checks and eager fallback; P19 mask caching is excluded.
