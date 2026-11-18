@@ -214,6 +214,28 @@ class ModelAclGraphManager(ModelCudaGraphManager):
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
         prefix_enabled = prefix_graph_configured(self.vllm_config)
+        hybrid_prefix_decode = prefix_enabled and getattr(self.compilation_config.cudagraph_mode, "name", None) == "FULL_DECODE_ONLY"
+        if hybrid_prefix_decode:
+            # Uniform decode rounds every requested gear to the nominal query
+            # width upstream. Build the bounded prefix capture plans explicitly;
+            # capture() still requires live proof and checks every resulting graph.
+            sizes = sorted(self.compilation_config.cudagraph_capture_sizes, reverse=True)
+            by_size = {desc.num_tokens: desc for desc in full_descs}
+            nominal = by_size.get(qlen)
+            if (
+                nominal is None
+                or len(by_size) != len(full_descs)
+                or set(by_size) - set(sizes)
+                or any(
+                    desc.num_reqs != 1
+                    or desc.uniform_token_count not in (None, desc.num_tokens)
+                    or desc.num_active_loras != 0
+                    or desc.num_ubatches != 1
+                    for desc in full_descs
+                )
+            ):
+                raise ValueError("Hybrid prefix capture requires unique single-request gears and a nominal descriptor")
+            full_descs = [by_size[size] if size in by_size else replace(nominal, num_tokens=size) for size in sizes]
         for orig in full_descs:
             d = orig
             if prefix_enabled:
@@ -234,6 +256,16 @@ class ModelAclGraphManager(ModelCudaGraphManager):
         # max_query_len / uniform_token_count / num_reqs.
         for key, lst in self._candidates.items():
             self._candidates[key] = [remap.get(id(d), d) for d in lst]
+        if hybrid_prefix_decode:
+            # Rebuild the upstream range index as well: its original entries
+            # all point at the single rounded nominal decode descriptor.
+            start = 0
+            for desc in reversed(reshaped):
+                for num_tokens in range(start, desc.num_tokens + 1):
+                    key = (num_tokens, 0)
+                    other_modes = [d for d in self._candidates.get(key, []) if d.cg_mode != CUDAGraphMode.FULL]
+                    self._candidates[key] = [desc, *other_modes]
+                start = desc.num_tokens + 1
 
     def init_breakable_cg_runner(self, model: nn.Module) -> None:
         if self.breakable_cg_runner is None:
@@ -422,9 +454,19 @@ class ModelAclGraphManager(ModelCudaGraphManager):
         from vllm_ascend.worker.v2.spec_decode.tree.speculator import AscendTreeSpeculator
 
         speculator = self.model_runner.speculator
-        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured, target_prefix_capture
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
+            prefix_graph_configured,
+            prefix_graph_runtime_proven,
+            target_prefix_capture,
+        )
 
         prefix_enabled = prefix_graph_configured(self.vllm_config)
+        if prefix_enabled and getattr(self.vllm_config.model_config.hf_config, "model_type", None) == "qwen3_5":
+            from vllm.distributed import get_tp_group
+
+            if not prefix_graph_runtime_proven(self.vllm_config, speculator, get_tp_group()):
+                speculator._tree_dflash2_prefix_proof = None
+                raise ValueError("Hybrid prefix FULL capture requires a live loaded-object prefix proof")
         if isinstance(speculator, AscendTreeSpeculator) and speculator.packed_dsv4_verify():
             from vllm_ascend.worker.v2.spec_decode.tree.full_graph import TreeFullGraphManager
 

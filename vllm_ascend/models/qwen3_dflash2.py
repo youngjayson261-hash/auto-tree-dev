@@ -5,6 +5,7 @@ from vllm.compilation.backends import set_model_tag
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import (
+    get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
     tensor_model_parallel_all_gather,
 )
@@ -270,6 +271,7 @@ class DFlash2Qwen3ForCausalLM(DFlashQwen3ForCausalLM):
 
     # Share the target LM head so compute_candidates can top-k the full vocab.
     has_own_lm_head = False
+    base_logits_parallel_contract = "raw_get_logits_rankcat_v1"
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__(vllm_config=vllm_config, prefix=prefix)
@@ -309,3 +311,129 @@ class DFlash2Qwen3ForCausalLM(DFlashQwen3ForCausalLM):
             cap = self.final_logit_softcapping
             values = torch.tanh(values / cap) * cap
         return ids, values
+
+    def compute_candidates_with_base_logits(
+        self, hidden_states: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the original lattice plus explicitly full-vocabulary base logits.
+
+        The correction head still selects the tree. These base logits are an
+        independent confidence source, not a full-vocabulary correction score.
+        Keep the ordinary two-result interface and its fixed-policy work intact.
+        """
+        tp_size = get_tensor_model_parallel_world_size()
+        if type(tp_size) is not int or tp_size not in (1, 2):
+            raise ValueError("DFlash2 full-vocabulary base confidence requires TP=1 or TP=2")
+        if tp_size == 2 and (not hasattr(self, "lm_head") or not hasattr(self, "logits_processor")):
+            raise ValueError("DFlash2 TP2 base confidence requires loaded head/processor proof")
+        if not isinstance(self.lm_head.quant_method, UnquantizedEmbeddingMethod):
+            raise ValueError("DFlash2 requires an unquantized target LM head for candidate TopK.")
+        vocab_size = self.config.vocab_size
+        top_k = self.model.candidate_selector.top_k
+        if tp_size == 1:
+            if self.lm_head.shard_indices.org_vocab_start_index != 0:
+                raise ValueError("DFlash2 base confidence requires the complete identity-mapped target vocabulary")
+            logits = self.lm_head.quant_method.apply(self.lm_head, hidden_states, bias=None)
+            num_pad = self.lm_head.shard_indices.num_org_vocab_padding
+            if num_pad > 0:
+                logits[..., -num_pad:] = -float("inf")
+            values, ids = torch.topk(logits, top_k, dim=-1)
+            ids = ids.to(torch.int64)
+            if logits.shape[-1] - num_pad != vocab_size:
+                raise ValueError("DFlash2 base confidence LM-head width does not match target vocabulary")
+            logits = logits[..., :vocab_size]
+        else:
+            # All checks here use loaded host metadata, before any collective.
+            # The caller also proves these facts for the actual TP group.
+            head, processor = self.lm_head, self.logits_processor
+            shard = head.shard_indices
+            rank = get_tensor_model_parallel_rank()
+            partition = getattr(head, "num_embeddings_per_partition", None)
+            padded_vocab = getattr(head, "num_embeddings_padded", None)
+            head_group = getattr(head, "parallel_group", None)
+            if (
+                type(rank) is not int
+                or not 0 <= rank < tp_size
+                or type(partition) is not int
+                or partition < 1
+                or type(padded_vocab) is not int
+                or padded_vocab != partition * tp_size
+                or type(vocab_size) is not int
+                or not partition < vocab_size <= padded_vocab
+                or type(top_k) is not int
+                or not 1 <= top_k <= vocab_size - partition
+                or type(getattr(head, "tp_size", None)) is not int
+                or head.tp_size != tp_size
+                or type(getattr(head, "tp_rank", None)) is not int
+                or head.tp_rank != rank
+                or head_group is not None
+                or getattr(head, "disable_tp", False) is not False
+            ):
+                raise ValueError("DFlash2 TP2 base confidence has incompatible parallel group/shard dimensions")
+            start, end = rank * partition, min((rank + 1) * partition, vocab_size)
+            facts = (
+                (getattr(head, "num_embeddings", None), vocab_size),
+                (getattr(head, "org_vocab_size", None), vocab_size),
+                (getattr(head, "num_added_embeddings", None), 0),
+                (getattr(head, "org_vocab_size_padded", None), padded_vocab),
+                (getattr(processor, "vocab_size", None), vocab_size),
+                (getattr(processor, "org_vocab_size", None), vocab_size),
+                (getattr(shard, "padded_org_vocab_start_index", None), start),
+                (getattr(shard, "padded_org_vocab_end_index", None), start + partition),
+                (getattr(shard, "org_vocab_start_index", None), start),
+                (getattr(shard, "org_vocab_end_index", None), end),
+                (getattr(shard, "num_org_vocab_padding", None), partition - (end - start)),
+            )
+            if (
+                any(type(value) is not int or value != expected for value, expected in facts)
+                or getattr(processor, "use_all_gather", None) is not True
+                or getattr(processor, "logits_as_input", None) is not False
+                or not callable(getattr(processor, "_get_logits", None))
+                or getattr(self, "draft_id_to_target_id", None) is not None
+                or head.weight.shape[0] != partition
+            ):
+                raise ValueError("DFlash2 TP2 base confidence requires contiguous target shards and raw all-gather")
+
+            # _get_logits performs one head GEMM and one full-vocab gather.
+            # Calling processor.forward would apply a different scale/softcap
+            # order; calling compute_candidates here would repeat the GEMM.
+            logits = processor._get_logits(hidden_states, head, None)
+            if (
+                not isinstance(logits, torch.Tensor)
+                or logits.shape != (hidden_states.shape[0], vocab_size)
+                or logits.dtype != head.weight.dtype
+                or logits.device != hidden_states.device
+                or not logits.is_floating_point()
+            ):
+                raise ValueError("DFlash2 TP2 base confidence requires complete raw logits on every rank")
+
+            # Recreate each original local TopK input, including its padding
+            # and dtype. A direct full-vocab TopK could change BF16 tie IDs.
+            # Every rank already owns full logits, so this needs no collective.
+            rank_values, rank_ids = [], []
+            for source_rank in range(tp_size):
+                first = source_rank * partition
+                real_count = min(partition, vocab_size - first)
+                local = torch.empty(
+                    (hidden_states.shape[0], partition), dtype=logits.dtype, device=logits.device
+                )
+                local[:, :real_count].copy_(logits[:, first : first + real_count])
+                if real_count < partition:
+                    local[:, real_count:].fill_(-float("inf"))
+                local_values, local_ids = torch.topk(local, top_k, dim=-1)
+                rank_values.append(local_values)
+                rank_ids.append(local_ids.to(torch.int64) + first)
+            values, selected = torch.topk(torch.cat(rank_values, dim=-1), top_k, dim=-1)
+            ids = torch.cat(rank_ids, dim=-1).gather(-1, selected)
+
+        values = values.float() * self.output_multiplier
+        if self.final_logit_softcapping is not None:
+            cap = self.final_logit_softcapping
+            values = torch.tanh(values / cap) * cap
+
+        # Slice padding before softcap: tanh(-inf) would turn padding into
+        # finite -cap scores and incorrectly add it to the denominator.
+        base_logits = logits.float() * self.output_multiplier
+        if self.final_logit_softcapping is not None:
+            base_logits = torch.tanh(base_logits / cap) * cap
+        return ids, values, base_logits

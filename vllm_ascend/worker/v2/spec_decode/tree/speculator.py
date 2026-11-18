@@ -811,14 +811,13 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         self.sample_indices.zero_()
         self.sample_pos.zero_()
         self.sample_idx_mapping.fill_(-1)
-        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
-
         legacy_capture_kwargs = {}
-        if vllm_version_is("0.31.0") and prefix_graph_configured(self.vllm_config):
+        if vllm_version_is("0.31.0"):
             from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 
             # v0.31 stores the first context rows inside the draft graph and
             # the remaining rows eagerly. Capture must not touch live KV pages.
+            # The legacy callback is required even outside prefix graph admission.
             self._context_slot_mappings.fill_(PAD_SLOT_ID)
             legacy_capture_kwargs["precompute_context_kv"] = lambda num_reqs: self._precompute_context_kv(
                 0, self._num_graph_context_tokens(num_reqs)
@@ -897,6 +896,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         sample_hidden_states = hidden[self.sample_indices[:num_sample]]
         draft_hidden = sample_hidden_states.view(num_reqs, self.num_speculative_steps, -1)
         draft_candidate_ids = None
+        base_confidence_logits = None
         if self.draft_backend == "dspark":
             logits = self.model.compute_draft_logits(sample_hidden_states)
         elif hasattr(getattr(self.model, "model", self.model), "candidate_selector") and hasattr(
@@ -905,12 +905,33 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             # DFlash2's selector head corrects the target-LM top-k lattice. Keep
             # the candidate IDs alongside the unary logits so the tree scorer
             # can evaluate edges against the actual frontier at each depth.
-            draft_candidate_ids, logits = self.model.compute_candidates(sample_hidden_states)
+            if self._tree_budget_enabled and self._tree_confidence_source == "base_full_vocab":
+                if not getattr(self, "_tree_dflash2_confidence_proven", False):
+                    raise ValueError("DFlash2 confidence requires a verified scoring interface")
+                draft_candidate_ids, logits, base_confidence_logits = self.model.compute_candidates_with_base_logits(
+                    sample_hidden_states
+                )
+            else:
+                draft_candidate_ids, logits = self.model.compute_candidates(sample_hidden_states)
         else:
             logits = self.model.compute_logits(sample_hidden_states)
         logits = logits.view(num_reqs, self.num_speculative_steps, -1)
         if self._tree_budget_enabled:
-            if draft_candidate_ids is not None or logits.shape[-1] != self._tree_full_vocab_size:
+            if draft_candidate_ids is not None:
+                if not getattr(self, "_tree_dflash2_confidence_proven", False):
+                    raise ValueError("DFlash2 confidence requires a verified scoring interface")
+                if self._tree_confidence_source == "base_full_vocab":
+                    if base_confidence_logits is None or base_confidence_logits.shape != (
+                        num_sample,
+                        self._tree_full_vocab_size,
+                    ):
+                        raise ValueError("confidence requires full base-vocabulary logits")
+                    base_confidence_logits = base_confidence_logits.view(
+                        num_reqs, self.num_speculative_steps, self._tree_full_vocab_size
+                    )
+                elif self._tree_confidence_source != "scorer_logprob":
+                    raise ValueError("unsupported DFlash2 confidence source")
+            elif logits.shape[-1] != self._tree_full_vocab_size:
                 raise ValueError("confidence requires full base-vocabulary logits")
         if draft_candidate_ids is not None:
             draft_candidate_ids = draft_candidate_ids.view(num_reqs, self.num_speculative_steps, -1)
@@ -938,6 +959,7 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 score_summary=summary,
                 full_vocab_size=self._tree_full_vocab_size,
                 verification_confidence_source=getattr(self, "_tree_confidence_source", "base_full_vocab"),
+                **({"base_confidence_logits": base_confidence_logits} if base_confidence_logits is not None else {}),
             )
 
     def _publish_tree_budget(self) -> None:
@@ -945,6 +967,18 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
             self._write_fixed_tree_budget()
         else:
             self._tree_budget_runtime.publish(self.tree, self.tree_budget_packet[: self.input_batch.num_reqs])
+            proof = getattr(self, "_tree_dflash2_confidence_proof", None)
+            if proof is not None and getattr(proof, "tp_size", 1) != 1:
+                from vllm.distributed import get_tp_group
+
+                from vllm_ascend.worker.v2.spec_decode.tree.confidence_admission import valid_tp2_confidence_proof
+
+                group = get_tp_group()
+                if not valid_tp2_confidence_proof(proof) or proof.tp_group is not group:
+                    raise ValueError("DFlash2 budget publish requires its proven live TP group")
+                # Publish on the producing stream before the existing tree seal.
+                # Every rank then consumes rank 0's [A, status] for this round.
+                group.broadcast(self.tree_budget_packet[: self.input_batch.num_reqs], src=0)
 
     def _write_fixed_tree_budget(self) -> None:
         packet = self.tree_budget_packet[: self.input_batch.num_reqs]

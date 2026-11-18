@@ -176,6 +176,12 @@ class TestTauZeroRuntimeAdmission(unittest.TestCase):
                 "validate_runtime_facts": self.policy.validate_runtime_facts,
             },
         }
+        prefix_spec = importlib.util.spec_from_file_location("tau_zero_prefix", POLICY.with_name("prefix_graph.py"))
+        prefix_module = importlib.util.module_from_spec(prefix_spec)
+        prefix_spec.loader.exec_module(prefix_module)
+        bindings["vllm_ascend.worker.v2.spec_decode.tree.prefix_graph"] = {
+            "prefix_graph_configured": prefix_module.prefix_graph_configured,
+        }
         modules = {}
         for name, values in bindings.items():
             parts = name.split(".")
@@ -322,7 +328,7 @@ class TestTauZeroSpeculatorGuards(unittest.TestCase):
             self.logits(self.state(True), logits=ShapeProbe(4))
 
     def test_positive_logits_still_rejects_candidate_mapping(self):
-        with self.assertRaisesRegex(ValueError, "full base-vocabulary logits"):
+        with self.assertRaisesRegex(ValueError, "verified scoring interface"):
             self.logits(self.state(True), logits=ShapeProbe(), draft_candidate_ids=object())
 
 

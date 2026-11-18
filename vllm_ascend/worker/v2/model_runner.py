@@ -380,6 +380,50 @@ class NPUModelRunner(GPUModelRunner):
             self.speculator.tree_commit = self.tree_commit
 
         self._validate_tree_confidence_runtime()
+        self._init_tree_prefix_runtime_proof()
+
+    def _init_tree_prefix_runtime_proof(self) -> None:
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
+            prefix_graph_configured,
+            prefix_graph_runtime_proven,
+            qwen35_dflash2_prefix_configured,
+        )
+
+        speculator = self.speculator
+        if speculator is None:
+            return
+        speculator._tree_dflash2_prefix_proof = None
+        if not prefix_graph_configured(self.vllm_config) or not qwen35_dflash2_prefix_configured(self.vllm_config):
+            return
+        from vllm.distributed import get_tp_group
+        from vllm.model_executor.layers.vocab_parallel_embedding import UnquantizedEmbeddingMethod
+
+        from vllm_ascend.models.qwen3_dflash2 import DFlash2Qwen3ForCausalLM
+        from vllm_ascend.worker.v2.spec_decode.tree.confidence_admission import prove_dflash2_confidence
+        from vllm_ascend.worker.v2.spec_decode.tree.dflash2_builder import DFlash2BeamTreeBuilder
+        from vllm_ascend.worker.v2.spec_decode.tree.scoring import DFlash2Scorer
+
+        tp_group = get_tp_group()
+        proof = prove_dflash2_confidence(
+            speculator.model,
+            speculator.tree_builder.scorer,
+            speculator.tree_builder,
+            model_type=DFlash2Qwen3ForCausalLM,
+            scorer_type=DFlash2Scorer,
+            builder_type=DFlash2BeamTreeBuilder,
+            target_vocab_size=self.vocab_size,
+            confidence_source="scorer_logprob",
+            tensor_parallel_size=self.vllm_config.parallel_config.tensor_parallel_size,
+            tp_group=tp_group,
+            unquantized_head_type=UnquantizedEmbeddingMethod,
+            purpose="prefix_full",
+        )
+        if proof is None:
+            raise ValueError("prefix FULL requires a verified DFlash2 loaded model, scorer, builder and TP group")
+        speculator._tree_dflash2_prefix_proof = proof
+        if not prefix_graph_runtime_proven(self.vllm_config, speculator, tp_group):
+            speculator._tree_dflash2_prefix_proof = None
+            raise ValueError("prefix FULL requires a verified DFlash2 interface matching configured vocabulary and selector")
 
     def _validate_tree_confidence_runtime(self, sampling_params=()) -> None:
         if not self._tree_budget_enabled:
@@ -397,6 +441,9 @@ class NPUModelRunner(GPUModelRunner):
         from vllm_ascend.worker.v2.spec_decode.tree.scoring import DominoScorer, IndependentScorer
 
         speculator = self.speculator
+        speculator._tree_dflash2_confidence_proven = False
+        speculator._tree_dflash2_confidence_proof = None
+        speculator._tree_dflash2_prefix_proof = None
         model = speculator.model
         expected_vocab = model.config.vocab_size if type(model) is AscendDominoQwen3ForCausalLM else None
         full_vocab = (
@@ -407,7 +454,32 @@ class NPUModelRunner(GPUModelRunner):
             and model.logits_processor.org_vocab_size == expected_vocab
         )
         confidence_source = getattr(speculator, "_tree_confidence_source", "base_full_vocab")
-        if confidence_source == "base_full_vocab":
+        dflash2_proof = None
+        if getattr(getattr(model, "config", None), "architectures", None) == ["DFlash2DraftModel"]:
+            from vllm.distributed import get_tp_group
+            from vllm.model_executor.layers.vocab_parallel_embedding import UnquantizedEmbeddingMethod
+
+            from vllm_ascend.models.qwen3_dflash2 import DFlash2Qwen3ForCausalLM
+            from vllm_ascend.worker.v2.spec_decode.tree.confidence_admission import prove_dflash2_confidence
+            from vllm_ascend.worker.v2.spec_decode.tree.dflash2_builder import DFlash2BeamTreeBuilder
+            from vllm_ascend.worker.v2.spec_decode.tree.scoring import DFlash2Scorer
+
+            dflash2_proof = prove_dflash2_confidence(
+                model,
+                speculator.tree_builder.scorer,
+                speculator.tree_builder,
+                model_type=DFlash2Qwen3ForCausalLM,
+                scorer_type=DFlash2Scorer,
+                builder_type=DFlash2BeamTreeBuilder,
+                target_vocab_size=self.vocab_size,
+                confidence_source=confidence_source,
+                tensor_parallel_size=self.vllm_config.parallel_config.tensor_parallel_size,
+                tp_group=get_tp_group(),
+                unquantized_head_type=UnquantizedEmbeddingMethod,
+            )
+            admitted = dflash2_proof is not None
+            expected_vocab = dflash2_proof.vocab_size if admitted else None
+        elif confidence_source == "base_full_vocab":
             admitted = admit_base_confidence_scorer(
                 type(speculator.tree_builder.scorer), IndependentScorer, DominoScorer, bool(full_vocab)
             )
@@ -466,8 +538,13 @@ class NPUModelRunner(GPUModelRunner):
             processors_supported=processors_supported,
             scorer_admitted=admitted,
             graph_admitted=prefix_graph_configured(cfg),
+            tensor_parallel_proof=dflash2_proof,
         )
+        if dflash2_proof is not None and prefix_graph_configured(cfg):
+            self._init_tree_prefix_runtime_proof()
         speculator._tree_full_vocab_size = expected_vocab
+        speculator._tree_dflash2_confidence_proven = dflash2_proof is not None
+        speculator._tree_dflash2_confidence_proof = dflash2_proof
 
     def _restore_replicated_draft_target_states(self) -> None:
         """Restore target states consumed by a replicated PCP draft."""
@@ -1016,11 +1093,20 @@ class NPUModelRunner(GPUModelRunner):
 
     def gather_batch_req_state(self, scheduler_output: SchedulerOutput, dummy_run: bool):
         batch_state, uniform_token_count = super().gather_batch_req_state(scheduler_output, dummy_run)
-        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
+            prefix_graph_configured,
+            prefix_graph_runtime_proven,
+        )
 
         if prefix_graph_configured(self.vllm_config) and self.cudagraph_manager is not None:
+            tp_group = None
+            if getattr(self.vllm_config.model_config.hf_config, "model_type", None) == "qwen3_5":
+                from vllm.distributed import get_tp_group
+
+                tp_group = get_tp_group()
             self.cudagraph_manager.tree_prefix_decode = bool(
                 batch_state is not None and not batch_state.has_prefill and not dummy_run
+                and prefix_graph_runtime_proven(self.vllm_config, self.speculator, tp_group)
             )
         if self._uses_flashmla and batch_state is not None:
             # The backend order must precede derived inputs and graph dispatch.
@@ -1415,6 +1501,7 @@ class NPUModelRunner(GPUModelRunner):
                 hidden_slice_ok=hidden_slice_ok,
             )
             self.tree_verification_plan["graph_requested"] = batch_desc.cg_mode == CUDAGraphMode.FULL
+            self.tree_verification_plan["graph_descriptor"] = batch_desc
             if mixed is not None:
                 self.tree_verification_plan["mixed_batch"] = mixed
         else:
