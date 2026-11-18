@@ -99,6 +99,14 @@ class DominoScorer:
     pass
 
 
+class MarkovScorer:
+    pass
+
+
+class DFlash2Scorer:
+    pass
+
+
 class LogitBiasState:
     pass
 
@@ -170,6 +178,8 @@ class TestTauZeroRuntimeAdmission(unittest.TestCase):
             "vllm_ascend.worker.v2.spec_decode.tree.scoring": {
                 "IndependentScorer": IndependentScorer,
                 "DominoScorer": DominoScorer,
+                "MarkovScorer": MarkovScorer,
+                "DFlash2Scorer": DFlash2Scorer,
             },
             "vllm_ascend.worker.v2.spec_decode.tree.budget_policy": {
                 "admit_base_confidence_scorer": self.policy.admit_base_confidence_scorer,
@@ -277,6 +287,8 @@ class TestTauZeroSpeculatorGuards(unittest.TestCase):
                     tree_spec_config=SimpleNamespace(verification_threshold=0.0)
                 ),
                 "confidence_source_metadata": lambda **values: values,
+                "MarkovScorer": MarkovScorer,
+                "DFlash2Scorer": DFlash2Scorer,
                 "logger": SimpleNamespace(info=lambda *args: self.logs.append(args)),
             }
         )
@@ -322,7 +334,7 @@ class TestTauZeroSpeculatorGuards(unittest.TestCase):
             self.logits(self.state(True), logits=ShapeProbe(4))
 
     def test_positive_logits_still_rejects_candidate_mapping(self):
-        with self.assertRaisesRegex(ValueError, "full base-vocabulary logits"):
+        with self.assertRaisesRegex(ValueError, "candidate-lattice confidence requires the DFlash2 scorer source"):
             self.logits(self.state(True), logits=ShapeProbe(), draft_candidate_ids=object())
 
 

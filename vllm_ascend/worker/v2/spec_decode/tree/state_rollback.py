@@ -466,12 +466,11 @@ class TreeVerifyChunk:
     ``[c * width, (c + 1) * width)`` of every row, so its tokens are always a
     *prefix* of those columns.
 
-    The chunk's token dim is ``rows * width`` and is addressed as a padded grid:
-    row ``r`` holds the nodes it owns in cells ``[r * width, r * width + length)``
-    and the remaining cells of that row are padding. The kernel never reads
-    padding -- ``cu_seqlens`` gives every row its prefix length and a row of
-    length 0 is skipped -- so the op sees the same shapes whatever the per-row
-    widths are, which is what a full CUDA graph needs.
+    The chunk's token capacity is ``rows * width``. Live row prefixes are
+    packed consecutively at its front, followed by padding. The kernel
+    accumulates ``cu_seqlens`` row counts into tight token offsets; leaving
+    padding between requests would make it read another row's padding.
+    Total capacity stays fixed for graph capture, including zero-length rows.
 
     Attributes:
         token_indices: ``[rows * width]`` int64, gather into the step's *packed*
@@ -684,6 +683,11 @@ def compute_tree_verify_plan(
     for index in range(chunk_starts.numel()):
         chunk_tokens = tokens[index].reshape(-1)
         chunk_owned = owned[index].reshape(-1)
+        # The recurrent op adds row lengths, not a fixed row stride. Keep live
+        # cells in request/node order and move all padding behind them.
+        order = chunk_owned.to(torch.float32).argsort(descending=True, stable=True)
+        chunk_tokens = chunk_tokens.index_select(0, order)
+        chunk_owned = chunk_owned.index_select(0, order)
         chunks.append(
             TreeVerifyChunk(
                 token_indices=chunk_tokens,

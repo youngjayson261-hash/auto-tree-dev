@@ -25,8 +25,10 @@ def _gather_tree_cache_rows_kernel(
     valid = tl.full((), True, tl.int1)
     for axis in tl.static_range(len(CACHE_STRIDES)):
         index = tl.load(indices_ptr + row * index_stride_row + axis * index_stride_axis).to(tl.int64)
-        valid = valid & (index >= 0) & (index < CACHE_SIZES[axis])
-        base += index * CACHE_STRIDES[axis]
+        # Convert the constexpr tuple at compile time: Triton 3.2 cannot
+        # subscript its constexpr wrapper directly. No device work is added.
+        valid = valid & (index >= 0) & (index < list(CACHE_SIZES)[axis])
+        base += index * list(CACHE_STRIDES)[axis]
     values = tl.load(cache_ptr + base + offsets, mask=valid & (offsets < ROW_ELEMENTS), other=0)
     tl.store(output_ptr + row * ROW_ELEMENTS + offsets, values, mask=offsets < ROW_ELEMENTS)
 
@@ -49,8 +51,8 @@ def _scatter_tree_cache_rows_kernel(
     valid = tl.full((), True, tl.int1)
     for axis in tl.static_range(len(CACHE_STRIDES)):
         index = tl.load(indices_ptr + row * index_stride_row + axis * index_stride_axis).to(tl.int64)
-        valid = valid & (index >= 0) & (index < CACHE_SIZES[axis])
-        base += index * CACHE_STRIDES[axis]
+        valid = valid & (index >= 0) & (index < list(CACHE_SIZES)[axis])
+        base += index * list(CACHE_STRIDES)[axis]
     values = tl.load(source_ptr + row * ROW_ELEMENTS + offsets, mask=offsets < ROW_ELEMENTS, other=0)
     tl.store(cache_ptr + base + offsets, values, mask=valid & (offsets < ROW_ELEMENTS))
 

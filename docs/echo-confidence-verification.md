@@ -1,5 +1,9 @@
 # ECHO confidence verification: evidence and remaining work
 
+Current compatibility adapters and their vocabulary/parallel/graph contracts
+are documented in [ECHO compatibility adapters](echo-compatibility-41.md).
+The dated acceptance records below retain their original configurations.
+
 This record separates Base correctness, Scorer calibration and Scorer formal acceptance.
 The accompanying [evidence index](echo-validation/2026-11-09-summary.json) pins
 the actual reports, raw archive hashes and source versions. Original raw tensor

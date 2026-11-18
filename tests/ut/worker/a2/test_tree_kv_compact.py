@@ -140,3 +140,60 @@ def test_original_kv_layers_share_round_snapshot_without_reusing_other_groups(mo
     assert [len(group[0]) for group in groups] == [2, 1]
     assert torch.equal(groups[0][1].cpu(), first_table.cpu())
     assert torch.equal(groups[1][1].cpu(), table.cpu())
+
+
+@pytest.mark.parametrize("dimensions", [1, 2, 3])
+@pytest.mark.parametrize("dtype", [torch.uint8, torch.bfloat16, torch.float32])
+@pytest.mark.parametrize("graph", [False, True])
+def test_padded_tree_cache_transfers_match_bytes_and_invalid_indices(dimensions, dtype, graph):
+    from vllm_ascend.ops.triton.spec_decode.tree.kv_transport import (
+        gather_tree_cache_rows,
+        scatter_tree_cache_rows_,
+    )
+    from vllm_ascend.ops.triton.triton_utils import init_device_properties_triton
+
+    init_device_properties_triton()
+    outer = [5, 4, 3][:dimensions]
+    physical = [size + 2 for size in outer]
+    # Offset view plus padding in every outer dimension, with 17-element rows
+    # to check the kernel's last-block mask. Compare the entire allocation.
+    storage = torch.randint(0, 255, (*physical, 17 * torch.empty((), dtype=dtype).element_size()), dtype=torch.uint8)
+    cache = storage.view(dtype)[tuple(slice(1, size + 1) for size in outer)]
+    original = storage.clone()
+    indices = torch.tensor(
+        [[0] * dimensions, [size - 1 for size in outer], [-1] * dimensions, outer], dtype=torch.int64
+    )
+    device_storage = storage.to("npu")
+    device_cache = device_storage.view(dtype)[tuple(slice(1, size + 1) for size in outer)]
+    device_indices = indices.to("npu")
+    gathered = torch.empty((4, 17), dtype=dtype, device="npu")
+    source_bytes = torch.randint(0, 255, (4, 17 * torch.empty((), dtype=dtype).element_size()), dtype=torch.uint8)
+    source = source_bytes.view(dtype).to("npu")
+
+    def transfer():
+        gather_tree_cache_rows(device_cache, device_indices, gathered)
+        scatter_tree_cache_rows_(device_cache, device_indices, source)
+
+    transfer()
+    if graph:
+        captured = torch.npu.NPUGraph()
+        with torch.npu.graph(captured):
+            transfer()
+    for reverse in (False, True):
+        current = indices.flip(0) if reverse else indices
+        device_indices.copy_(current.to("npu"))
+        device_storage.copy_(original.to("npu"))
+        if graph:
+            captured.replay()
+        else:
+            transfer()
+        expected = original.clone()
+        expected_cache = expected.view(dtype)[tuple(slice(1, size + 1) for size in outer)]
+        expected_rows = torch.zeros((4, 17), dtype=dtype)
+        for row, index in enumerate(current.tolist()):
+            if all(0 <= value < size for value, size in zip(index, outer)):
+                expected_rows[row].copy_(cache[tuple(index)])
+                expected_cache[tuple(index)].copy_(source_bytes.view(dtype)[row])
+        torch.npu.synchronize()
+        assert torch.equal(gathered.cpu().view(torch.uint8), expected_rows.view(torch.uint8))
+        assert torch.equal(device_storage.cpu(), expected)

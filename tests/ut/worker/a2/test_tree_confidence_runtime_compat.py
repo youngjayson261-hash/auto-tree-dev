@@ -23,6 +23,14 @@ class DominoScorer:
     pass
 
 
+class MarkovScorer:
+    pass
+
+
+class DFlash2Scorer:
+    pass
+
+
 class LogitBiasState:
     pass
 
@@ -105,6 +113,8 @@ class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
             "vllm_ascend.worker.v2.spec_decode.tree.scoring": {
                 "IndependentScorer": IndependentScorer,
                 "DominoScorer": DominoScorer,
+                "MarkovScorer": MarkovScorer,
+                "DFlash2Scorer": DFlash2Scorer,
             },
             "vllm_ascend.worker.v2.spec_decode.tree.budget_policy": {
                 "admit_base_confidence_scorer": lambda scorer, independent, domino, full_vocab: (

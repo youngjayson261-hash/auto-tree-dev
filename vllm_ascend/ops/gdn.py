@@ -313,8 +313,9 @@ def _chunked_tree_verify(
     into node-column chunks, chained through the state pages: node ``j`` loads its
     parent's page through ``init_state_indices``, which the chunk that verified
     the parent already wrote (every builder guarantees ``parent_id < node_id``).
-    Each chunk is a padded ``rows * width`` token grid whose padding cells are
-    skipped through ``cu_seqlens``, so every recorded call has the same shape.
+    Each chunk has fixed ``rows * width`` capacity, with live row prefixes
+    packed consecutively and padding only at the tail. ``cu_seqlens`` supplies
+    each row's count, so every recorded call keeps the same capacity.
 
     Args:
         query: ``[1, tokens, nk, dk]`` in the packed token order of the step (the

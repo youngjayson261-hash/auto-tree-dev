@@ -211,14 +211,31 @@ class ModelAclGraphManager(ModelCudaGraphManager):
             return
         remap: dict[int, BatchExecutionDescriptor] = {}
         reshaped: list[BatchExecutionDescriptor] = []
-        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_capture_shapes, prefix_graph_configured
 
         prefix_enabled = prefix_graph_configured(self.vllm_config)
+        if prefix_enabled:
+            self._capture_descs[CUDAGraphMode.FULL] = sorted(
+                (
+                    BatchExecutionDescriptor(
+                        cg_mode=CUDAGraphMode.FULL,
+                        num_tokens=rows * capacity,
+                        num_reqs=rows,
+                        max_query_len=capacity,
+                        uniform_token_count=None,
+                    )
+                    for rows, capacity in prefix_capture_shapes(self.vllm_config)
+                ),
+                key=lambda d: (d.num_tokens, d.num_reqs),
+                reverse=True,
+            )
+            # Prefix dispatch below uses the exact real-BS descriptors. The
+            # upstream token-only lookup would permit fictitious padded rows.
+            self._candidates.clear()
+            return
         for orig in full_descs:
             d = orig
-            if prefix_enabled:
-                d = replace(orig, num_reqs=1, max_query_len=orig.num_tokens, uniform_token_count=None)
-            elif orig.num_tokens > 0 and orig.num_tokens % qlen == 0:
+            if orig.num_tokens > 0 and orig.num_tokens % qlen == 0:
                 k = orig.num_tokens // qlen
                 d = replace(
                     orig,
@@ -248,8 +265,27 @@ class ModelAclGraphManager(ModelCudaGraphManager):
         max_query_len: int | None = None,
         num_ubatches: int = 1,
     ) -> BatchExecutionDescriptor:
-        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
+        from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_capture_sizes, prefix_graph_configured
 
+        tree_options = (self.vllm_config.additional_config or {}).get("tree_spec_config") or {}
+        if "verification_eager_pad_to_full_tree" in tree_options:
+            from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import eager_tree_verification_capacity
+
+            capacity = eager_tree_verification_capacity(
+                self.model_runner.ascend_config.tree_spec_config,
+                self.vllm_config.scheduler_config.max_num_batched_tokens,
+                num_reqs,
+                num_tokens,
+                decode=self.tree_prefix_decode,
+            )
+            if capacity is not None:
+                return BatchExecutionDescriptor(
+                    cg_mode=CUDAGraphMode.NONE,
+                    num_tokens=capacity,
+                    num_reqs=num_reqs,
+                    num_active_loras=num_active_loras,
+                    num_ubatches=num_ubatches,
+                )
         if prefix_graph_configured(self.vllm_config):
             if not self._graphs_captured or not self.tree_prefix_decode:
                 return BatchExecutionDescriptor(
@@ -259,20 +295,27 @@ class ModelAclGraphManager(ModelCudaGraphManager):
                     num_active_loras=num_active_loras,
                     num_ubatches=num_ubatches,
                 )
-            if num_reqs != 1 or num_active_loras != 0 or num_ubatches != 1:
-                raise RuntimeError("prefix tree graph requires one request without LoRA or microbatches")
-            desc = super().dispatch(
-                num_reqs,
-                num_tokens,
-                uniform_token_count,
-                num_active_loras,
-                max_query_len=max_query_len,
-                num_ubatches=num_ubatches,
-            )
-            expected = min(n for n in self.compilation_config.cudagraph_capture_sizes if n >= num_tokens)
-            if desc.cg_mode != CUDAGraphMode.FULL or desc.num_tokens != expected or desc.num_reqs != 1:
-                raise RuntimeError("missing smallest prefix tree FULL graph")
-            return desc
+            if num_active_loras != 0 or num_ubatches != 1:
+                raise RuntimeError("prefix tree graph excludes LoRA and microbatches")
+            if max_query_len is None and num_reqs == 1:
+                max_query_len = num_tokens
+            if max_query_len is None:
+                raise RuntimeError("prefix tree graph needs the real maximum per-request query length")
+            expected = next((n for n in prefix_capture_sizes(self.vllm_config) if n >= max_query_len), None)
+            if expected is None:
+                raise RuntimeError("prefix tree query exceeds all configured FULL graph capacities")
+            eligible = [
+                d
+                for d in self._capture_descs[CUDAGraphMode.FULL]
+                if d.cg_mode == CUDAGraphMode.FULL
+                and d.num_reqs == num_reqs
+                and d.max_query_len == expected
+                and d.num_tokens == num_reqs * expected
+                and d.num_tokens >= num_tokens
+            ]
+            if not eligible:
+                raise RuntimeError("missing prefix tree FULL graph for the real batch and query lengths")
+            return min(eligible, key=lambda d: d.num_tokens)
         if self.tree_mixed_batch:
             # These calls contain independently built linear and tree metadata.
             # Captured tree-only gears cannot replay either the phase partition
@@ -454,12 +497,16 @@ class ModelAclGraphManager(ModelCudaGraphManager):
                     progress_bar_desc=progress_bar_desc,
                 )
             if prefix_enabled:
-                captured = sorted(d.num_tokens for d in self.graphs if d.cg_mode == CUDAGraphMode.FULL)
-                if captured != sorted(self.compilation_config.cudagraph_capture_sizes):
+                from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_capture_shapes
+
+                captured = {
+                    (d.num_reqs, d.num_tokens // d.num_reqs) for d in self.graphs if d.cg_mode == CUDAGraphMode.FULL
+                }
+                if captured != set(prefix_capture_shapes(self.vllm_config)):
                     raise RuntimeError(f"Target prefix graph capture incomplete: {captured}")
-                for size in captured:
+                for rows, size in sorted(captured):
                     speculator.tree_graph_stats.record_capture("target")
-                    logger.info("Captured prefix Target FULL graph num_reqs=1 query_capacity=%s", size)
+                    logger.info("Captured prefix Target FULL graph num_reqs=%s query_capacity=%s", rows, size)
             return result
         finally:
             # Input preparation can fail before ModelWithContext.forward runs.

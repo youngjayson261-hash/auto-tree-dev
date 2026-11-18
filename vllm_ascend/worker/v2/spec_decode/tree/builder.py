@@ -186,8 +186,15 @@ class TreeBuilder:
         flat = (parent_scores.unsqueeze(-1) + scores).masked_fill(~valid[None], float("-inf")).reshape(r, -1)
         confidence_candidates = None
         if confidence is not None:
+            # The tree always stores global target IDs. Base confidence must
+            # instead index the original columns of a mapped draft vocabulary.
+            confidence_tokens = layer.base_token_ids
+            if confidence_tokens is None:
+                confidence_tokens = tokens
+            elif confidence_tokens.shape[1] == 1:
+                confidence_tokens = confidence_tokens.expand(-1, width, -1)
             confidence_candidates = confidence.candidates(
-                tokens, state.frontier, valid, child_depth - 1, edge_scores=scores
+                confidence_tokens, state.frontier, valid, child_depth - 1, edge_scores=scores
             )
         selected = flat.argsort(dim=-1, descending=True, stable=True)[:, :width].clone()
         if self.keep_origin_chain:
@@ -217,14 +224,30 @@ class TreeBuilder:
         verification_confidence_source: str = "base_full_vocab",
     ):
         r, depth, vocab = draft_logits.shape
+        candidate_vocab_proven = (
+            type(self.scorer) is DFlash2Scorer
+            and draft_candidate_ids is not None
+            and draft_candidate_ids.shape == draft_logits.shape
+            and draft_candidate_ids.dtype in (torch.int32, torch.int64)
+            and type(full_vocab_size) is int
+            and full_vocab_size > 0
+            and full_vocab_size == self.scorer.successor_codebook.shape[0]
+        )
         if score_summary is not None and (
-            draft_candidate_ids is not None
-            or not admit_verification_confidence_scorer(
+            not admit_verification_confidence_scorer(
                 type(self.scorer),
                 IndependentScorer,
                 DominoScorer,
-                type(full_vocab_size) is int and full_vocab_size > 0 and full_vocab_size == vocab,
+                candidate_vocab_proven
+                or (
+                    draft_candidate_ids is None
+                    and type(full_vocab_size) is int
+                    and full_vocab_size > 0
+                    and full_vocab_size == vocab
+                ),
                 source=verification_confidence_source,
+                markov_type=MarkovScorer,
+                dflash2_type=DFlash2Scorer,
             )
         ):
             label = "base" if verification_confidence_source == "base_full_vocab" else "scorer"

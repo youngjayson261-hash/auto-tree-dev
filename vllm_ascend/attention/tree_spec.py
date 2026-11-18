@@ -138,7 +138,12 @@ def dummy_tree_mask_for_capture(num_tokens: int, num_reqs: int) -> bool:
 
     if prefix_capture_active():
         capacity = tree_query_len()
-        return num_reqs == 1 and capacity is not None and 1 <= num_tokens <= capacity
+        return (
+            num_reqs > 0
+            and num_tokens % num_reqs == 0
+            and capacity is not None
+            and 1 <= num_tokens // num_reqs <= capacity
+        )
     shaped = tree_verify_shape(num_tokens)
     return shaped is not None and shaped[0] == num_reqs
 

@@ -29,6 +29,8 @@ class CandidateLayer:
     scores: torch.Tensor
     token_ids: torch.Tensor
     origin_child: torch.Tensor | None = None
+    # Columns in the uncorrected draft logits. Target IDs may use another map.
+    base_token_ids: torch.Tensor | None = None
 
 
 class IndependentScorer:
@@ -88,9 +90,10 @@ class MarkovScorer(IndependentScorer):
             bias = self.model.markov_bias(emb.reshape(-1, emb.shape[-1]))
             logits = logits + bias.view(*emb.shape[:-1], -1)
         scores, ids, origin = select_candidates(logits, state.width, keep_origin_chain=keep_origin_chain)
+        base_ids = ids
         if self.model is not None:
             ids = self.model.map_draft_to_target(ids)
-        return CandidateLayer(scores, ids, origin)
+        return CandidateLayer(scores, ids, origin, base_ids)
 
     def update(self, state, ctx, num_added):
         ctx.frontier_tokens = state.tokens[:, state.num_nodes : state.num_nodes + num_added]
@@ -405,3 +408,51 @@ class DominoScorer(IndependentScorer):
         tokens = state.tokens[:, state.num_nodes : state.num_nodes + num_added]
         updated = self.correction.update_hidden(tokens.reshape(-1), previous.reshape(-1, h))
         ctx.hidden_states[:, start : start + num_added] = updated.reshape(tokens.shape[0], num_added, h)
+
+
+def validate_confidence_vocabulary(model, scorer, target_vocab_size: int, source: str) -> int:
+    """Validate a new adapter once after weight loading, before graph capture.
+
+    Markov normalizes its entire draft vocabulary, retaining separate base
+    column IDs and global target IDs. DFlash2 normalizes a candidate lattice
+    built from global target TopK IDs; it cannot supply base_full_vocab scores.
+    A mapped Markov checkpoint must be injective: merging duplicate target IDs
+    would require a different probability contract. No device read is added to
+    the per-step path; only a nonidentity checkpoint map is checked here.
+    """
+    if type(target_vocab_size) is not int or target_vocab_size < 1:
+        raise ValueError("confidence requires a positive target vocabulary")
+    if type(scorer) is DFlash2Scorer:
+        if source != "scorer_logprob":
+            raise ValueError("DFlash2 confidence requires scorer_logprob; full base logits are unavailable")
+        if (
+            getattr(model.config, "vocab_size", None) != target_vocab_size
+            or scorer.predecessor_codebook.shape[0] != target_vocab_size
+            or scorer.successor_codebook.shape[0] != target_vocab_size
+            or not callable(getattr(model, "compute_candidates", None))
+            or not 1 <= scorer.top_k <= target_vocab_size
+        ):
+            raise ValueError("DFlash2 confidence requires a global-target candidate vocabulary")
+        return target_vocab_size
+    if type(scorer) is not MarkovScorer or scorer.model is not model:
+        raise ValueError("confidence vocabulary requires an exact bound scoring adapter")
+    size = getattr(model.config, "draft_vocab_size", None) or model.config.vocab_size
+    processor = model.logits_processor
+    if type(size) is not int or size < 1 or processor.vocab_size != size or processor.org_vocab_size != size:
+        raise ValueError("Markov confidence requires complete draft-vocabulary logits")
+    mapping = getattr(model, "draft_id_to_target_id", None)
+    if mapping is None:
+        if size != target_vocab_size:
+            raise ValueError("Markov confidence needs a map for a nonidentical vocabulary")
+    else:
+        if mapping.shape != (size,) or mapping.dtype not in (torch.int32, torch.int64):
+            raise ValueError("Markov confidence mapping must contain one integer offset per draft token")
+        mapped = model.map_draft_to_target(torch.arange(size, device=mapping.device, dtype=torch.long)).detach().cpu()
+        if (
+            mapped.shape != (size,)
+            or mapped.dtype not in (torch.int32, torch.int64)
+            or bool(((mapped < 0) | (mapped >= target_vocab_size)).any())
+            or mapped.unique().numel() != size
+        ):
+            raise ValueError("Markov confidence requires an injective in-range draft-to-target mapping")
+    return size

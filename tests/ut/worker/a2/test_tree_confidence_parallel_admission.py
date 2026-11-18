@@ -56,6 +56,18 @@ class TestConfidenceParallelAdmission(unittest.TestCase):
         self.runner.ascend_config.finegrained_tp_config = SimpleNamespace(**dict.fromkeys(FINE_FIELDS, 1))
         self.validate(self.runner)
 
+    def test_replicated_full_vocabulary_with_vanilla_tp_is_admitted(self):
+        for size in (2, 4):
+            self.runner.vllm_config.parallel_config.tensor_parallel_size = size
+            self.validate(self.runner)
+            self.assertEqual(self.facts["tp"], size)
+
+    def test_invalid_tp_dimensions_are_not_admitted(self):
+        for size in (0, -1, True, 2.0, "2", None):
+            self.runner.vllm_config.parallel_config.tensor_parallel_size = size
+            with self.assertRaisesRegex(ValueError, "parallelism"):
+                self.validate(self.runner)
+
     def test_real_runner_rejects_unadmitted_parallel_dimensions(self):
         for name in ("data_parallel_size", "prefill_context_parallel_size", "decode_context_parallel_size"):
             with self.subTest(field=name):
