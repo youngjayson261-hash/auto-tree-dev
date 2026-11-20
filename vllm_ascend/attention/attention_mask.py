@@ -216,7 +216,6 @@ class AttentionMaskBuilder:
                 if for_capture and not tree_shaped:
                     return self.get_splitfuse_attn_mask()
                 return self.get_tree_attention_mask(
-                return self.get_tree_attention_mask(
                     tree_visibility,
                     seq_lens,
                     num_decode,
