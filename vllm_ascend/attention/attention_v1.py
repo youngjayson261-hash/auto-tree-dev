@@ -77,7 +77,6 @@ from vllm_ascend.device.device_op import DeviceOperator
 from vllm_ascend.device.hardware_profile import HardwareCapability, get_current_hardware_profile
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.attention_fence import attention_transfer_window
 from vllm_ascend.ops.triton.spec_decode.tree.kv_transport import gather_tree_cache_rows
-from vllm_ascend.utils import MINIMAX_M3_FP8_KV_CACHE_BLOCK_SIZE, is_minimax_m3_fp8_kv_cache, vllm_version_is
 from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import (
     prefix_capture_active,
     prefix_graph_configured,
