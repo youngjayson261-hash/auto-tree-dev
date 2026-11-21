@@ -713,6 +713,27 @@ class AscendMambaHybridModelState(MambaHybridModelState, AscendModelState):
                     return builder.try_refresh_tree_group(block_table, row_seq_lens, tree, num_accepted_tokens)
                 return None
 
+        # Mirror the default model state's capture fallback: the dummy batch
+        # carries no tree, but the tree mask builder requires a visibility
+        # tensor for the k x (1+budget) FULL capture gears.
+        tree_visibility = getattr(input_batch, "tree_visibility", None)
+        if for_capture and tree_visibility is None:
+            from vllm_ascend.ascend_config import get_ascend_config
+            from vllm_ascend.attention.attention_mask import dummy_tree_mask_for_capture
+            from vllm_ascend.attention.tree_spec import dummy_tree_visibility, is_draft_forward
+            from vllm_ascend.worker.v2.spec_decode import dflash_tree_spec_enabled
+
+            if (
+                dflash_tree_spec_enabled(self.vllm_config)
+                and dummy_tree_mask_for_capture(num_input_tokens, num_reqs)
+                and not is_draft_forward()
+            ):
+                tree_visibility = dummy_tree_visibility(
+                    num_reqs,
+                    self.device,
+                    budget=get_ascend_config().tree_spec_config.budget,
+                )
+
         metadata = build_attn_metadata(
             refresh_tree_group=refresh_group,
             attn_groups=attn_groups,
@@ -741,7 +762,7 @@ class AscendMambaHybridModelState(MambaHybridModelState, AscendModelState):
             # Tree GQA must receive the same visibility mask as Qwen3-8B;
             # GDN only adds recurrent state transport and must not alter the
             # ordinary GQA path when the field is absent.
-            tree_visibility=getattr(input_batch, "tree_visibility", None),
+            tree_visibility=tree_visibility,
             for_cudagraph_capture=for_capture,
         )
         tree = model_specific_metadata.shared_gdn_tree
