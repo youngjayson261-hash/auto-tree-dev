@@ -1780,6 +1780,12 @@ def _is_supported_flash_attn_draft(spec: SpeculativeConfig, model_tag: str) -> b
 
 def _validate_draft_fa3_backend(selector) -> bool:
     """Select the device-tiling FA3 backend for DFlash2 draft attention."""
+    if os.environ.get("VLLM_ASCEND_DISABLE_DFLASH_FA3") == "1":
+        # Capture-safe fallback: the deployed flash_attn_npu_3 predates the
+        # device-length tiling fix (0.5.1) and performs host reads during
+        # graph capture; stay on the dense attention_v1 backend, matching
+        # the p25-b baseline runtime which had no flash_attn_npu_3 at all.
+        return False
     from vllm.compilation import backends
     from vllm.config import get_current_vllm_config_or_none
 
@@ -1824,6 +1830,10 @@ def _validate_target_fa3_backend(selector) -> bool:
     attention keeps GDN. Encoder (vision) layers stay on their own backend:
     only DECODER attention selects FA3 here.
     """
+    if os.environ.get("VLLM_ASCEND_DISABLE_DFLASH_FA3") == "1":
+        # See _validate_draft_fa3_backend: flash_attn_npu_3 on this image
+        # does host reads during capture; keep the p25-b dense backend.
+        return False
     from vllm.compilation import backends
     from vllm.config import get_current_vllm_config_or_none
     from vllm.v1.attention.backend import AttentionType
