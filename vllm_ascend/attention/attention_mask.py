@@ -193,54 +193,6 @@ class AttentionMaskBuilder:
         for_capture: bool = False,
         common_attn_metadata=None,
     ):
-        if not causal:
-            # FIA applies any provided mask as defaultMask (sparse_mode=0),
-            # which would wrongly mask out the upper triangle for
-            # bidirectional attention, so non-causal attention must not
-            # carry a mask here. The 310P mask builder overrides this
-            # because its attention operators require an explicit
-            # non-masking mask instead.
-            return None
-
-        if num_decode > 0:
-            tree_shaped = num_tokens > 0 and dummy_tree_mask_for_capture(num_tokens, num_decode)
-            if tree_visibility is None and (
-                tree_shaped
-                if for_capture
-                else (need_dummy_tree_visibility_for_capture() and seq_lens_are_tree_query(seq_lens, num_decode))
-            ):
-                tree_visibility = dummy_tree_visibility(num_decode, self.device)
-            if tree_visibility is not None:
-                # Dummy FULL gears that are not k × (1+budget) must keep the
-                # 2D splitfuse mask. TND + sparse 3 rejects a 4D tree mask.
-                if for_capture and not tree_shaped:
-                    return self.get_splitfuse_attn_mask()
-                return self.get_tree_attention_mask(
-                    tree_visibility,
-                    seq_lens,
-                    num_decode,
-                    query_lens=query_lens,
-                    for_capture=for_capture,
-                    common_attn_metadata=common_attn_metadata,
-                )
-
-        if model_config.runner_type == "pooling":
-            return self.get_attn_mask(2048, torch.bool)
-
-        return self.get_splitfuse_attn_mask()
-
-    def get_attention_mask(
-        self,
-        causal: bool,
-        model_config: ModelConfig,
-        tree_visibility: torch.Tensor | None = None,
-        seq_lens: torch.Tensor | None = None,
-        num_decode: int = 0,
-        num_tokens: int = 0,
-        for_capture: bool = False,
-        query_lens: list[int] | None = None,
-        common_attn_metadata=None,
-    ):
         max_nodes = tree_visibility.shape[-1]
         query_len = 1 + max_nodes
         max_caps = self._resolved_tree_caps()
@@ -344,3 +296,51 @@ class AttentionMaskBuilder:
                 seq_lens.data_ptr(),
             )
         return attn_mask
+    def get_attention_mask(
+        self,
+        causal: bool,
+        model_config: ModelConfig,
+        tree_visibility: torch.Tensor | None = None,
+        seq_lens: torch.Tensor | None = None,
+        num_decode: int = 0,
+        num_tokens: int = 0,
+        for_capture: bool = False,
+        query_lens: list[int] | None = None,
+        common_attn_metadata=None,
+    ):
+        if not causal:
+            # FIA applies any provided mask as defaultMask (sparse_mode=0),
+            # which would wrongly mask out the upper triangle for
+            # bidirectional attention, so non-causal attention must not
+            # carry a mask here. The 310P mask builder overrides this
+            # because its attention operators require an explicit
+            # non-masking mask instead.
+            return None
+
+        if num_decode > 0:
+            tree_shaped = num_tokens > 0 and dummy_tree_mask_for_capture(num_tokens, num_decode)
+            if tree_visibility is None and (
+                tree_shaped
+                if for_capture
+                else (need_dummy_tree_visibility_for_capture() and seq_lens_are_tree_query(seq_lens, num_decode))
+            ):
+                tree_visibility = dummy_tree_visibility(num_decode, self.device)
+            if tree_visibility is not None:
+                # Dummy FULL gears that are not k × (1+budget) must keep the
+                # 2D splitfuse mask. TND + sparse 3 rejects a 4D tree mask.
+                if for_capture and not tree_shaped:
+                    return self.get_splitfuse_attn_mask()
+                return self.get_tree_attention_mask(
+                    tree_visibility,
+                    seq_lens,
+                    num_decode,
+                    query_lens=query_lens,
+                    for_capture=for_capture,
+                    common_attn_metadata=common_attn_metadata,
+                )
+
+        if model_config.runner_type == "pooling":
+            return self.get_attn_mask(2048, torch.bool)
+
+        return self.get_splitfuse_attn_mask()
+
