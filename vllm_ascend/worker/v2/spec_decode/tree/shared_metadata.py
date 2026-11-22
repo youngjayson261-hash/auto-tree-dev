@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import torch
+from vllm.v1.attention.backends.utils import NULL_BLOCK_ID
 
 from vllm_ascend.worker.v2.spec_decode.tree.state_rollback import (
     GDN_RECURRENT_MAX_VERIFY_TOKENS,
@@ -30,10 +31,14 @@ class _VerifyGeometry:
 
 @dataclass(frozen=True)
 class SharedGDNTreeMetadata:
-    """Logical metadata for one complete BS1 tree, without physical state pages.
+    """Logical metadata for one BS1 tree prefix, without physical state pages.
 
     A model state's prepare_attn owns this object for one step. Builders bind
     their own page tables, then retain their existing graph-stable copy targets.
+    ``query_width`` below ``slots`` describes a cropped verification row: the
+    inactive slots are masked with ``NULL_BLOCK_ID`` at bind time and the
+    verify geometry truncates at the prefix, while every table keeps its full
+    ``slots`` shape so a FULL graph replays the same buffers.
     """
 
     slots: int
@@ -41,6 +46,9 @@ class SharedGDNTreeMetadata:
     init_state_columns: torch.Tensor
     conv_window_rows: torch.Tensor
     conv_prefix_src: torch.Tensor
+    query_width: int
+    graph_capacity: int
+    invalid_slots: torch.Tensor | None
     _verify_geometry: dict[int, _VerifyGeometry] = field(default_factory=dict, repr=False, compare=False)
 
     request_id: str | None = None
@@ -58,6 +66,8 @@ class SharedGDNTreeMetadata:
         prev_num_sampled: torch.Tensor,
         conv_width: int,
         *,
+        query_width: int | None = None,
+        graph_capacity: int | None = None,
         request_id: str | None = None,
         use_fused_topology: bool = False,
         page_batch: "GDNTreePageBatch | None" = None,
@@ -74,7 +84,22 @@ class SharedGDNTreeMetadata:
             raise ValueError("The GDN convolution width must be positive.")
 
         slots = parents.shape[1] + 1
+        query_width = slots if query_width is None else query_width
+        graph_capacity = slots if graph_capacity is None else graph_capacity
+        if not isinstance(query_width, int) or not isinstance(graph_capacity, int):
+            raise ValueError("Shared GDN query width and graph capacity must be host integers.")
+        if not 1 <= query_width <= graph_capacity <= slots:
+            raise ValueError("Shared GDN metadata requires 1 <= query_width <= graph_capacity <= slots.")
         device = parents.device
+        invalid_slots = None
+        row_widths = None
+        if query_width < slots:
+            invalid_slots = torch.arange(slots, device=device)[None, :] >= query_width
+            row_widths = torch.tensor([query_width], dtype=torch.int32, device="cpu")
+            # The fused topology kernel packs the full tree width; a cropped
+            # row keeps the host path with its row-width-aware conv table.
+            use_fused_topology = False
+            page_batch = None
         if (
             use_fused_topology
             and device.type == "npu"
@@ -91,7 +116,18 @@ class SharedGDNTreeMetadata:
             columns, windows, prefix = build_gdn_tree_topology(
                 parents, num_nodes, depths, num_accepted_tokens, prev_path_node_ids, prev_num_sampled, conv_width
             )
-            return cls(slots, conv_width, columns, windows, prefix, request_id=request_id, page_batch=page_batch)
+            return cls(
+                slots=slots,
+                conv_width=conv_width,
+                init_state_columns=columns,
+                conv_window_rows=windows,
+                conv_prefix_src=prefix,
+                query_width=query_width,
+                graph_capacity=graph_capacity,
+                invalid_slots=invalid_slots,
+                request_id=request_id,
+                page_batch=page_batch,
+            )
         chain_parents = torch.arange(slots - 1, device=device, dtype=torch.long)
         parent_columns = torch.where(num_nodes[:, None] > 0, parents.to(torch.long), chain_parents[None, :])
         root_column = (num_accepted_tokens.to(torch.long) - 1).clamp(min=0).unsqueeze(1)
@@ -107,9 +143,13 @@ class SharedGDNTreeMetadata:
                 num_nodes,
                 conv_width,
                 conv_width - 1,
+                row_widths=row_widths,
                 tree_depths=depths,
             ),
             conv_prefix_src=compute_tree_prefix_source(prev_path_node_ids, prev_num_sampled, conv_width),
+            query_width=query_width,
+            graph_capacity=graph_capacity,
+            invalid_slots=invalid_slots,
         )
 
     def _check_state_table(self, state_indices: torch.Tensor) -> None:
@@ -123,7 +163,17 @@ class SharedGDNTreeMetadata:
     def bind_init_state_indices(self, state_indices: torch.Tensor) -> torch.Tensor:
         """Resolve shared logical parents against this group's physical pages."""
         self._check_state_table(state_indices)
-        return state_indices.gather(1, self.init_state_columns).to(torch.int32)
+        indices = state_indices.gather(1, self.init_state_columns).to(torch.int32)
+        if self.invalid_slots is not None:
+            indices = indices.masked_fill(self.invalid_slots, NULL_BLOCK_ID)
+        return indices
+
+    def bind_state_indices(self, state_indices: torch.Tensor) -> torch.Tensor:
+        """Pack this group's BS1 pages and clear every inactive tree slot."""
+        self._check_state_table(state_indices)
+        if self.invalid_slots is None:
+            return state_indices
+        return state_indices.masked_fill(self.invalid_slots, NULL_BLOCK_ID)
 
     def _get_verify_geometry(self, scratch_base: int) -> _VerifyGeometry:
         geometry = self._verify_geometry.get(scratch_base)
@@ -138,7 +188,7 @@ class SharedGDNTreeMetadata:
         # A chunk verifies at most ``width`` tokens: all but the last chunk
         # are full, so the raw ``slots - start`` over-counts there and must be
         # clamped (the per-chunk loop used ``min(width, slots - start)``).
-        lengths = (self.slots - starts.squeeze(1)).clamp(max=width)  # [C] per-chunk real length
+        lengths = (self.query_width - starts.squeeze(1)).clamp(min=0, max=width)  # [C] per-chunk real length
         owned = cells < lengths.unsqueeze(1)
         owned_tokens = torch.where(owned, token_indices, torch.zeros_like(token_indices))
         scratch = cells.squeeze(0) + scratch_base

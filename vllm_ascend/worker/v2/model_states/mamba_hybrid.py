@@ -111,6 +111,8 @@ class AscendMambaHybridAttnMetadata(MambaHybridAttnMetadata):
     tree_prev_num_sampled: torch.Tensor | None = None
     tree_depths: torch.Tensor | None = None
     share_tree_metadata: bool = False
+    tree_query_width: int | None = None
+    tree_graph_capacity: int | None = None
     tree_request_id: str | None = None
     shared_gdn_tree: "SharedGDNTreeMetadata | None" = None
 
@@ -162,6 +164,8 @@ class AscendMambaHybridAttnMetadata(MambaHybridAttnMetadata):
                     self.tree_prev_path,
                     self.tree_prev_num_sampled,
                     attn_metadata_builder.spec_conv_width,
+                    query_width=self.tree_query_width,
+                    graph_capacity=self.tree_graph_capacity,
                     request_id=self.tree_request_id,
                 )
             if self.shared_gdn_tree.conv_width == attn_metadata_builder.spec_conv_width:
@@ -667,19 +671,23 @@ class AscendMambaHybridModelState(MambaHybridModelState, AscendModelState):
             tree_prev_path=tree_prev_path,
             tree_prev_num_sampled=tree_prev_num_sampled,
             tree_depths=getattr(input_batch, "tree_depths", None),
-            # Only a real, complete BS1 FULL verify uses this fast path.
-            # Capture/dummy/prefill/truncated rows retain the existing builder.
+            # A real BS1 FULL verify uses this fast path, including cropped
+            # rows whose width the scheduler reports on the host (a truncated
+            # draft near max_model_len or an exhausted tree search). Capture,
+            # dummy and prefill steps retain the existing builder.
             share_tree_metadata=(
                 tree_slots is not None
                 and not for_capture
                 and not input_batch.is_dummy
                 and cudagraph_mode == CUDAGraphMode.FULL
                 and input_batch.num_reqs == num_reqs == 1
-                and input_batch.num_tokens == num_tokens == tree_slots
+                and 1 < input_batch.num_tokens <= num_tokens <= tree_slots
                 and num_decode_draft_tokens_cpu is not None
-                and int(num_decode_draft_tokens_cpu[0]) == tree_slots - 1
+                and int(num_decode_draft_tokens_cpu[0]) == input_batch.num_tokens - 1
                 and not bool(is_prefilling[0])
             ),
+            tree_query_width=int(input_batch.num_tokens) if tree_slots is not None else None,
+            tree_graph_capacity=int(num_tokens) if tree_slots is not None else None,
         )
         if model_specific_metadata.share_tree_metadata:
             model_specific_metadata.tree_request_id = input_batch.req_ids[0]
@@ -942,9 +950,11 @@ class AscendTreeMambaHybridModelState(AscendMambaHybridModelState):
                 break
         if conv_width is None:
             return
+        full_row = metadata.tree_query_width in (None, metadata.tree_parents.shape[1] + 1)
         page_batch = None
         if (
-            not self.vllm_config.scheduler_config.async_scheduling
+            full_row
+            and not self.vllm_config.scheduler_config.async_scheduling
             and metadata.tree_parents.device.type == "npu"
             and metadata.tree_parents.shape[1] + 1 == GDNTreePageBatch.SLOTS
         ):
@@ -959,7 +969,9 @@ class AscendTreeMambaHybridModelState(AscendMambaHybridModelState):
             metadata.tree_prev_path,
             metadata.tree_prev_num_sampled,
             conv_width,
+            query_width=metadata.tree_query_width,
+            graph_capacity=metadata.tree_graph_capacity,
             request_id=metadata.tree_request_id,
-            use_fused_topology=not self.vllm_config.scheduler_config.async_scheduling,
+            use_fused_topology=full_row and not self.vllm_config.scheduler_config.async_scheduling,
             page_batch=page_batch,
         )
