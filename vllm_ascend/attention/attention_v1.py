@@ -418,10 +418,17 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             # TND: last actual_seq_q must equal the padded hidden length (queryT).
             # A short prefill can miss the dummy qsl entry; append the graph size.
             num_input_tokens = common_attn_metadata.num_input_tokens
+            # The static tree-prefix admission is a pure function of the launch
+            # configuration, which is immutable for this instance's lifetime;
+            # prove it once and reuse the verdict instead of re-walking the
+            # config on every metadata build.
+            prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+            if prefix_admitted is None:
+                prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
             if (
                 actual_seq_lengths_q
                 and num_input_tokens > actual_seq_lengths_q[-1]
-                and not prefix_graph_configured(self.vllm_config)
+                and not prefix_admitted
             ):
                 actual_seq_lengths_q = actual_seq_lengths_q + [num_input_tokens]
         else:

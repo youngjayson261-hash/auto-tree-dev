@@ -1227,15 +1227,28 @@ class NPUModelRunner(GPUModelRunner):
             prefix_graph_runtime_proven,
         )
 
-        if prefix_graph_configured(self.vllm_config) and self.cudagraph_manager is not None:
+        prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_admitted is None:
+            # Static admission is a pure function of the launch configuration;
+            # prove it once per runner instead of re-walking the config per step.
+            prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
+        if prefix_admitted and self.cudagraph_manager is not None:
             tp_group = None
             if getattr(self.vllm_config.model_config.hf_config, "model_type", None) == "qwen3_5":
                 from vllm.distributed import get_tp_group
 
                 tp_group = get_tp_group()
+            proof = getattr(self.speculator, "_tree_dflash2_prefix_proof", None)
+            proven_key = getattr(self, "_tree_prefix_proven_key", None)
+            if proven_key is not None and proven_key[0] is proof and proven_key[1] is tp_group:
+                prefix_proven = True
+            else:
+                prefix_proven = prefix_graph_runtime_proven(self.vllm_config, self.speculator, tp_group)
+                # Only positive proofs are cached: a cleared or replaced proof
+                # re-runs the full validation on the next step.
+                self._tree_prefix_proven_key = (proof, tp_group) if prefix_proven else None
             self.cudagraph_manager.tree_prefix_decode = bool(
-                batch_state is not None and not batch_state.has_prefill and not dummy_run
-                and prefix_graph_runtime_proven(self.vllm_config, self.speculator, tp_group)
+                batch_state is not None and not batch_state.has_prefill and not dummy_run and prefix_proven
             )
         if self._uses_flashmla and batch_state is not None:
             # The backend order must precede derived inputs and graph dispatch.
@@ -1639,7 +1652,10 @@ class NPUModelRunner(GPUModelRunner):
         batch = self._prepare_inputs_impl(scheduler_output, batch_req_state, batch_desc)
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
-        if prefix_graph_configured(self.vllm_config):
+        prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_admitted is None:
+            prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
+        if prefix_admitted:
             q, capacity = batch.num_tokens, batch.num_tokens_after_padding
             self.input_buffers.is_padding[:q].fill_(False)
             self.input_buffers.is_padding[q:capacity].fill_(True)
@@ -2100,7 +2116,10 @@ class NPUModelRunner(GPUModelRunner):
         """
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
-        if cudagraph_runtime_mode == CUDAGraphMode.FULL and prefix_graph_configured(self.vllm_config):
+        prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_admitted is None:
+            prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
+        if cudagraph_runtime_mode == CUDAGraphMode.FULL and prefix_admitted:
             if num_reqs != 1 or not 1 <= int(query_start_loc_np[1]) <= num_tokens_padded:
                 raise ValueError("prefix graph padding must preserve one real query")
             # BSND carries physical Q separately from actual_seq_lengths=[q].

@@ -224,7 +224,11 @@ class ModelAclGraphManager(ModelCudaGraphManager):
     ) -> BatchExecutionDescriptor:
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
-        if prefix_graph_configured(self.vllm_config):
+        prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_admitted is None:
+            # Static admission is configuration-pure; prove once per manager.
+            prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
+        if prefix_admitted:
             if not self._graphs_captured or not self.tree_prefix_decode:
                 return BatchExecutionDescriptor(
                     cg_mode=CUDAGraphMode.NONE,
@@ -363,7 +367,10 @@ class ModelAclGraphManager(ModelCudaGraphManager):
         graph.update(self.update_stream, resolved_tasks)
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
-        if prefix_graph_configured(self.vllm_config):
+        prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_admitted is None:
+            prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
+        if prefix_admitted:
             stats = self.model_runner.speculator.tree_graph_stats
             stats.record_lookup("target", True)
             stats.record_replay("target")
