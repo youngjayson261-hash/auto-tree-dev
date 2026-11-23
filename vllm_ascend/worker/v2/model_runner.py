@@ -693,15 +693,7 @@ class NPUModelRunner(GPUModelRunner):
         output = super().sample_tokens(grammar_output)
         self._lmhead_pad_size = None
         if self.is_last_pp_rank and isinstance(self.speculator, AscendTreeSpeculator):
-            tree = self.speculator.tree
-            input_batch = self.speculator.input_batch
-            idx = input_batch.idx_mapping
-            self.req_states.tree_depths[idx] = tree.depths
-            self.req_states.tree_parents[idx] = tree.parents
-            self.req_states.tree_visibility[idx] = tree.visibility
-            self.req_states.tree_num_nodes[idx] = tree.num_nodes
-            self.req_states.tree_first_child[idx] = tree.first_child
-            self.req_states.tree_next_sibling[idx] = tree.next_sibling
+            self._commit_tree_metadata_to_req_states()
             self.draft_tokens_handler.seal_budget_production()
         # Close the per-step msprobe dump cycle on the normal last-PP-rank
         # path (v1 parity: v1 finalizes at the end of sample_tokens).
@@ -729,6 +721,27 @@ class NPUModelRunner(GPUModelRunner):
         # _pool() on the pooling path.
         self._finalize_dump_data()
         return output
+
+    def _commit_tree_metadata_to_req_states(self) -> None:
+        """Scatter this step's tree metadata into persistent per-request state.
+
+        The speculator tree buffers are statically shaped (max_num_reqs, ...)
+        and only the leading ``num_reqs`` rows are rebuilt for the current
+        batch. When a request finishes before its batchmates (adaptive
+        acceptance under tau policies), the running batch shrinks (e.g. 2->1)
+        while the buffers keep their max-width shape, so the scatter must
+        slice the leading rows before indexing by ``idx_mapping``.
+        """
+        tree = self.speculator.tree
+        input_batch = self.speculator.input_batch
+        idx = input_batch.idx_mapping
+        n = idx.shape[0]
+        self.req_states.tree_depths[idx] = tree.depths[:n]
+        self.req_states.tree_parents[idx] = tree.parents[:n]
+        self.req_states.tree_visibility[idx] = tree.visibility[:n]
+        self.req_states.tree_num_nodes[idx] = tree.num_nodes[:n]
+        self.req_states.tree_first_child[idx] = tree.first_child[:n]
+        self.req_states.tree_next_sibling[idx] = tree.next_sibling[:n]
 
     def add_requests(self, scheduler_output: SchedulerOutput) -> None:
         if self._tree_budget_enabled:
