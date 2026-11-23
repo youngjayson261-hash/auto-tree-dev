@@ -727,6 +727,32 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 # Publish on the producing stream before the existing tree seal.
                 # Every rank then consumes rank 0's [A, status] for this round.
                 group.broadcast(self.tree_budget_packet[: self.input_batch.num_reqs], src=0)
+        self._sanitize_bad_tree_rows()
+
+    def _sanitize_bad_tree_rows(self) -> None:
+        """Degenerate LAYOUT_ERROR rows into a root-only tree, on device.
+
+        The host learns about a bad layout only when the budget packet is read
+        back; with asynchronous readback that is one step late, so a bad row's
+        tree may be verified once before the service stops. Zeroing the row's
+        geometry (no valid nodes, empty visibility, no child links) makes that
+        verify accept the root alone, which rejection sampling keeps correct.
+        Rows with a healthy layout are untouched, and the synchronous path
+        raises before the sanitized tree is ever scheduled.
+        """
+        num_reqs = self.input_batch.num_reqs
+        if num_reqs == 0:
+            return
+        bad = self.tree_budget_packet[:num_reqs, 1] == int(PolicyStatus.LAYOUT_ERROR)
+        rows = bad.unsqueeze(1)
+        tree = self.tree
+        tree.num_nodes[:num_reqs].masked_fill_(bad, 0)
+        tree.depths[:num_reqs].masked_fill_(rows, 0)
+        tree.parents[:num_reqs].masked_fill_(rows, -1)
+        tree.tokens[:num_reqs].masked_fill_(rows, -1)
+        tree.first_child[:num_reqs].masked_fill_(rows, -1)
+        tree.next_sibling[:num_reqs].masked_fill_(rows, -1)
+        tree.visibility[:num_reqs].masked_fill_(rows.unsqueeze(2), False)
 
     def _write_fixed_tree_budget(self) -> None:
         packet = self.tree_budget_packet[: self.input_batch.num_reqs]
