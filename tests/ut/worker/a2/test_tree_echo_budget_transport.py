@@ -62,7 +62,11 @@ def test_one_copy_after_seal_and_frozen_identity(transport):
     with pytest.raises(RuntimeError, match="sealed"):
         handler.get_draft_tokens()
     handler.seal_budget_production()
-    assert calls == ["record"]
+    # Sealing records the production event and enqueues the D2H copy without
+    # blocking: the gate wait, the copy, the retention and the completion
+    # record all happen here, so the consume side only synchronizes on the
+    # already-complete copy.
+    assert calls == ["record", "wait", "copy", "retain", "record"]
     result = handler.get_draft_tokens()
     assert result.req_ids == ["a", "b"]
     assert result.draft_token_ids == [[-1, -1], []]

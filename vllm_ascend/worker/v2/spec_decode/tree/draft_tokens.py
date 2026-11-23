@@ -30,6 +30,13 @@ class TreeDraftTokensHandler(DraftTokensHandler):
     Request-state tokens remain on device. The builder's selected-node count
     is uniform across requests and comes from host shapes, including during
     graph capture; it never reads the device ``tree.num_nodes`` buffer.
+
+    The default path enqueues the packet D2H copy at seal time (right after
+    production is published) and synchronizes only when the scheduler actually
+    consumes the width. The copy therefore overlaps the host's output-handling
+    window, and the consume-side synchronize returns immediately. The consumed
+    packet is the current step's own production, so the tree/width pairing is
+    identical to a fully synchronous readback.
     """
 
     def __init__(
@@ -87,6 +94,7 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         if self._budget_sealed:
             raise RuntimeError("confidence budget already sealed")
         self._budget_produced.record()
+        self._seal_budget_copy()
         self._budget_sealed = True
 
     def get_draft_tokens(self) -> DraftTokenIds | None:
@@ -101,14 +109,7 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         if not self._budget_sealed:
             raise RuntimeError("confidence budget production is not sealed")
         try:
-            count = len(pending.req_ids)
-            self.copy_stream.wait_event(self._budget_produced)
-            with torch.npu.stream(self.copy_stream):
-                self._budget_cpu[:count].copy_(pending.packet, non_blocking=True)
-                pending.packet.record_stream(self.copy_stream)
-                self.copy_event.record(self.copy_stream)
-            self.copy_event.synchronize()
-            rows = self._budget_cpu[:count].tolist()
+            rows = self._read_budget_rows(pending)
             accepted = []
             for req_id, slot, (budget, status) in zip(pending.req_ids, pending.slots, rows):
                 status = PolicyStatus(status)
@@ -128,3 +129,29 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         finally:
             self._pending_budget = None
             self._budget_sealed = False
+
+    def _seal_budget_copy(self) -> None:
+        """Enqueue this step's packet D2H on the copy stream without blocking.
+
+        The packet is final once the production event completes on device, so
+        the copy stream fetches it while the host finishes output handling;
+        the consume-side synchronize in ``get_draft_tokens`` then finds the
+        data already in the pinned buffer. The host synchronizes before the
+        next step is scheduled, which keeps the persistent device packet safe
+        from being overwritten mid-copy without a packet-free event.
+        """
+        pending = self._pending_budget
+        assert pending is not None
+        count = len(pending.req_ids)
+        self.copy_stream.wait_event(self._budget_produced)
+        with torch.npu.stream(self.copy_stream):
+            self._budget_cpu[:count].copy_(pending.packet, non_blocking=True)
+            pending.packet.record_stream(self.copy_stream)
+            self.copy_event.record(self.copy_stream)
+
+    def _read_budget_rows(self, pending: _PendingBudget) -> list:
+        count = len(pending.req_ids)
+        # The copy was enqueued at seal time; the output-handling window
+        # gives it a full step's tail to complete, so this returns fast.
+        self.copy_event.synchronize()
+        return self._budget_cpu[:count].tolist()
