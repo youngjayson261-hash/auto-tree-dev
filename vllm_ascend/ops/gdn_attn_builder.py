@@ -1766,6 +1766,9 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
         self._full_tree_metadata: GDNAttentionMetadata | None = None
         self._full_tree_request_id: str | None = None
+        self._cropped_tree_metadata: GDNAttentionMetadata | None = None
+        self._cropped_tree_request_id: str | None = None
+        self._cropped_spec_token_arange: torch.Tensor | None = None
         self._using_full_tree_inputs = False
         self._tree_input_layouts = None
         self._conv_layer_name = layer_names[0] if layer_names else None
@@ -2108,6 +2111,97 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
             chunk.init_state_indices.copy_(init_pages[0])
         return self._finalize_metadata(metadata)
 
+    def _can_reuse_cropped_tree_metadata(
+        self,
+        common: CommonAttentionMetadata,
+        tree: "SharedGDNTreeMetadata",
+        num_accepted_tokens: torch.Tensor | None,
+        draft_widths_cpu: torch.Tensor | None,
+        num_actual_reqs: int | None,
+    ) -> bool:
+        # Cropped counterpart of _can_reuse_full_tree_metadata: a BS1 row
+        # narrower than the tree keeps the full ``slots`` shapes with inactive
+        # slots masked, so the same warm-descriptor refresh applies with the
+        # query width as the only step-varying scalar.
+        return (
+            self.use_full_cuda_graph
+            and self.use_spec_decode
+            and self.vllm_config.parallel_config.pipeline_parallel_size == 1
+            and (not self.vllm_config.scheduler_config.async_scheduling or tree.request_id is not None)
+            and not getattr(self.speculative_config, "enable_adaptive_verification", False)
+            and not getattr(common, "for_cudagraph_capture", False)
+            and getattr(common, "pcp_context", None) is None
+            and tree.invalid_slots is not None
+            and 1 < tree.query_width < tree.slots
+            and tree.query_width <= tree.graph_capacity <= tree.slots
+            and self.spec_tree_slots == tree.slots
+            and self.spec_conv_width == tree.conv_width
+            and num_actual_reqs == common.num_reqs == 1
+            and common.num_actual_tokens == common.max_query_len == tree.query_width
+            and common.query_start_loc_cpu.shape == (2,)
+            and tuple(common.query_start_loc_cpu.numpy()) == (0, tree.query_width)
+            and draft_widths_cpu is not None
+            and draft_widths_cpu.device.type == "cpu"
+            and draft_widths_cpu.shape == (1,)
+            and int(draft_widths_cpu.numpy()[0]) == tree.query_width - 1
+            and num_accepted_tokens is not None
+            and num_accepted_tokens.shape == (1,)
+            and common.block_table_tensor.shape[0] == common.seq_lens.shape[0] == 1
+        )
+
+    def _refresh_cropped_tree_metadata(
+        self,
+        metadata: GDNAttentionMetadata,
+        block_table: torch.Tensor,
+        seq_lens: torch.Tensor,
+        tree: "SharedGDNTreeMetadata",
+        accepted: torch.Tensor,
+    ) -> GDNAttentionMetadata:
+        # Cropped rows never swap in the shared full-tree buffers: every
+        # reference in the cached descriptor points at this group's own stable
+        # capture buffers (verified when the descriptor was cached), so only
+        # data-dependent values are rewritten here.
+        query_width = tree.query_width
+        spec = metadata.spec_decode_metadata
+        table = mamba_get_block_table_tensor(
+            block_table,
+            seq_lens,
+            self.kv_cache_spec,
+            self.vllm_config.cache_config.mamba_cache_mode,
+        )
+        pages = table[:1, : tree.slots]
+        metadata.num_accepted_tokens.copy_(accepted)
+        metadata.spec_state_indices_tensor.copy_(tree.bind_state_indices(pages))
+        spec.init_state_indices.copy_(tree.bind_init_state_indices(pages))
+        spec.spec_causal_conv1d.cache_indices = metadata.spec_state_indices_tensor
+        # The cropped width is the only step-varying scalar: rewrite the query
+        # span ([0] stays pinned at 0), the packed token order and the
+        # sequence lengths the kernels read from the stable buffers.
+        self.spec_query_start_loc[1].fill_(query_width)
+        if self.spec_actual_seq_lengths is not None:
+            self.spec_actual_seq_lengths[1].fill_(query_width)
+        if self._cropped_spec_token_arange is None:
+            self._cropped_spec_token_arange = torch.arange(
+                self.spec_tree_slots, dtype=torch.int32, device=pages.device
+            )
+        self.spec_token_indx[:query_width].copy_(self._cropped_spec_token_arange[:query_width])
+        metadata.spec_token_indx = self.spec_token_indx[:query_width]
+        metadata.num_actual_tokens = query_width
+        metadata.num_spec_decode_tokens = query_width
+        spec.conv_window_rows.copy_(tree.conv_window_rows)
+        spec.conv_prefix_src.copy_(tree.conv_prefix_src)
+        if spec.verify_plan is not None:
+            plan = tree.bind_and_copy_into(
+                metadata.spec_state_indices_tensor,
+                spec.init_state_indices,
+                query_width,
+                self.spec_verify_plan_buffers,
+                getattr(self, "_spec_verify_plan_views", None),
+            )
+            self._spec_verify_plan_views = plan
+            spec.verify_plan = plan
+        return self._finalize_metadata(metadata)
+
     def build(
         self,
         common_prefix_len: int,
@@ -2131,6 +2225,14 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
                 common_attn_metadata, shared_gdn_tree, num_accepted_tokens, num_decode_draft_tokens_cpu, num_actual_reqs
             )
         )
+        cropped = (
+            not complete
+            and common_prefix_len == 0
+            and shared_gdn_tree is not None
+            and self._can_reuse_cropped_tree_metadata(
+                common_attn_metadata, shared_gdn_tree, num_accepted_tokens, num_decode_draft_tokens_cpu, num_actual_reqs
+            )
+        )
         # Worker dispatch enqueues the previous target, tree publication and
         # these dynamic writes in order on the same compute stream, including
         # when the scheduler has already queued the next 33-slot descriptor.
@@ -2146,9 +2248,23 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
                 shared_gdn_tree,
                 num_accepted_tokens,
             )
+        if (
+            cropped
+            and not self._using_full_tree_inputs
+            and self._cropped_tree_metadata is not None
+            and self._cropped_tree_request_id == shared_gdn_tree.request_id
+        ):
+            return self._refresh_cropped_tree_metadata(
+                self._cropped_tree_metadata,
+                common_attn_metadata.block_table_tensor,
+                common_attn_metadata.seq_lens,
+                shared_gdn_tree,
+                num_accepted_tokens,
+            )
         # A prefill, idle row or another graph shape can overwrite the same
         # stable buffers. Reinitialize them on the next complete verify.
         self._full_tree_metadata = None
+        self._cropped_tree_metadata = None
         metadata = super().build(
             common_prefix_len,
             common_attn_metadata,
@@ -2179,6 +2295,38 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
             ):
                 self._full_tree_metadata = metadata
                 self._full_tree_request_id = shared_gdn_tree.request_id
+        elif (
+            cropped
+            and not self._using_full_tree_inputs
+            and metadata.spec_decode_metadata is not None
+        ):
+            spec = metadata.spec_decode_metadata
+            plan = spec.verify_plan
+            # Cache only when the build landed on this group's stable capture
+            # buffers; otherwise the refresh path could not rewrite it safely.
+            if (
+                metadata.num_spec_decodes == 1
+                and metadata.num_prefills == metadata.num_decodes == 0
+                and metadata.spec_state_indices_tensor.shape == (1, shared_gdn_tree.slots)
+                and metadata.spec_state_indices_tensor.data_ptr() == self.spec_state_indices_tensor.data_ptr()
+                and metadata.num_accepted_tokens.data_ptr() == self.num_accepted_tokens.data_ptr()
+                and metadata.spec_query_start_loc.data_ptr() == self.spec_query_start_loc.data_ptr()
+                and metadata.spec_token_indx.data_ptr() == self.spec_token_indx.data_ptr()
+                and spec.init_state_indices is not None
+                and spec.init_state_indices.data_ptr() == self.spec_init_state_indices.data_ptr()
+                and spec.actual_seq_lengths is not None
+                and self.spec_actual_seq_lengths is not None
+                and spec.actual_seq_lengths.data_ptr() == self.spec_actual_seq_lengths.data_ptr()
+                and spec.conv_window_rows is not None
+                and spec.conv_window_rows.data_ptr() == self.spec_conv_window_rows.data_ptr()
+                and spec.conv_prefix_src is not None
+                and spec.conv_prefix_src.data_ptr() == self.spec_conv_prefix_src.data_ptr()
+                and plan is not None
+                and plan.rows == plan.num_chunks == 1
+                and plan.slots == plan.width == shared_gdn_tree.slots
+            ):
+                self._cropped_tree_metadata = metadata
+                self._cropped_tree_request_id = shared_gdn_tree.request_id
         return metadata
 
     def _finalize_metadata(self, metadata: GDNAttentionMetadata, fused: bool = False) -> GDNAttentionMetadata:

@@ -27,6 +27,17 @@ class _VerifyGeometry:
     owned: torch.Tensor
     out_indices: torch.Tensor
     cu_seqlens: torch.Tensor
+    # ``~owned``; kept beside ``owned`` so the stacked bind masks the gathered
+    # tables with one in-place ``masked_fill_`` instead of a scalar ``where``.
+    not_owned: torch.Tensor
+
+
+# Verify geometry depends only on (device, slots, query width, scratch base);
+# every per-step tree object would otherwise rebuild the same tensors. The
+# tensors are read-only after construction (``bind_and_copy_into`` copies them
+# into the group's stable buffers), so sharing across steps is safe.
+_VERIFY_GEOMETRY_CACHE: "dict[tuple, _VerifyGeometry]" = {}
+_VERIFY_GEOMETRY_CACHE_LIMIT = 64
 
 
 @dataclass(frozen=True)
@@ -180,6 +191,11 @@ class SharedGDNTreeMetadata:
         if geometry is not None:
             return geometry
         device = self.init_state_columns.device
+        cache_key = (device.type, device.index, self.slots, self.query_width, scratch_base)
+        geometry = _VERIFY_GEOMETRY_CACHE.get(cache_key)
+        if geometry is not None:
+            self._verify_geometry[scratch_base] = geometry
+            return geometry
         width = self.slots
         num_chunks = -(-self.slots // width)
         cells = torch.arange(width, dtype=torch.long, device=device).unsqueeze(0)
@@ -201,8 +217,12 @@ class SharedGDNTreeMetadata:
             owned=owned,
             out_indices=out_indices,
             cu_seqlens=cu_seqlens,
+            not_owned=~owned,
         )
         self._verify_geometry[scratch_base] = geometry
+        if len(_VERIFY_GEOMETRY_CACHE) >= _VERIFY_GEOMETRY_CACHE_LIMIT:
+            _VERIFY_GEOMETRY_CACHE.pop(next(iter(_VERIFY_GEOMETRY_CACHE)))
+        _VERIFY_GEOMETRY_CACHE[cache_key] = geometry
         return geometry
 
     def _bind_stacked(
@@ -231,8 +251,12 @@ class SharedGDNTreeMetadata:
         flat_state = state_indices.reshape(-1)
         flat_init = init_state_indices.reshape(-1)
         shape = geometry.token_indices.shape
-        state = torch.where(geometry.owned, flat_state.index_select(0, tokens).reshape(shape), -1)
-        init = torch.where(geometry.owned, flat_init.index_select(0, tokens).reshape(shape), -1)
+        # ``index_select`` returns a fresh contiguous tensor, so masking it in
+        # place is safe and skips the scalar promotion of ``where(owned, x, -1)``.
+        state = flat_state.index_select(0, tokens).reshape(shape)
+        state.masked_fill_(geometry.not_owned, -1)
+        init = flat_init.index_select(0, tokens).reshape(shape)
+        init.masked_fill_(geometry.not_owned, -1)
         return geometry, state, init
 
     def bind_plan(
