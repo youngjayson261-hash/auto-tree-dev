@@ -207,28 +207,60 @@ class GDNPrefixPlanContracts(unittest.TestCase):
         state = torch.arange(100, 165, dtype=torch.int32).view(1, 65)
         parent = torch.cat([state[:, :1], state[:, :-1]], dim=1)
         for q in [1, 65, 13, 33, 1, 16, 17, 18, 32, 49, 50, 64]:
-            p = min(n for n in [1, 17, 33, 49, 65] if n >= q)
             widths = torch.tensor([q])
             packed_state = subject._pack_tree_rows_to_tokens(state, widths, 65)
             packed_parent = subject._pack_tree_rows_to_tokens(parent, widths, 65)
             self.assertTrue(torch.equal(packed_state[0, :q], state[0, :q]))
             self.assertTrue((packed_state[0, q:] == -1).all())
             plan = subject.compute_tree_verify_plan(widths, packed_state, packed_parent, q).copy_into(buffers)
-            self.assertEqual(plan.num_chunks, 5)
-            visited = []
-            for index, chunk in enumerate(plan.chunks):
-                count = max(0, min(16, q - index * 16))
-                self.assertEqual(chunk.cu_seqlens.tolist(), [0, count])
-                self.assertTrue((chunk.token_indices >= 0).all())
-                self.assertTrue((chunk.token_indices < q).all())
-                self.assertTrue(torch.equal(chunk.state_indices[:count], state[0, index * 16:index * 16 + count]))
-                self.assertTrue((chunk.state_indices[count:] == -1).all())
-                self.assertTrue((chunk.init_state_indices[count:] == -1).all())
-                self.assertTrue((chunk.out_indices[count:] >= q).all())
-                self.assertTrue((chunk.out_indices < p + 16).all())
-                visited.extend(chunk.out_indices[:count].tolist())
-            self.assertEqual(visited, list(range(q)))
-            self.assertEqual(addresses, tuple(getattr(buffers, field.name).data_ptr() for field in fields(buffers)))
+            # The Triton op has no per-call token limit: one whole-tree chunk.
+            self.assertEqual(plan.num_chunks, 1)
+            chunk = plan.chunks[0]
+            self.assertEqual(chunk.cu_seqlens.tolist(), [0, q])
+            # Tight layout: the row's cells sit at [0, q), the tail is padding.
+            self.assertTrue(torch.equal(chunk.token_indices[:q], torch.arange(q)))
+            self.assertTrue(torch.equal(chunk.state_indices[:q], packed_state.reshape(-1)[:q]))
+            self.assertTrue(torch.equal(chunk.init_state_indices[:q], packed_parent.reshape(-1)[:q]))
+            self.assertTrue(torch.equal(chunk.out_indices[:q], torch.arange(q)))
+            self.assertTrue((chunk.state_indices[q:] == -1).all())
+            self.assertTrue((chunk.init_state_indices[q:] == -1).all())
+            self.assertTrue((chunk.out_indices[q:] >= q).all())
+            self.assertTrue((chunk.out_indices[q:] < q + 65).all())
+        self.assertEqual(addresses, tuple(getattr(buffers, field.name).data_ptr() for field in fields(buffers)))
+
+    def test_variable_row_widths_pack_tight_under_kernel_addressing(self):
+        """Short rows must not shift later rows onto padding cells.
+
+        The kernel accumulates row starts from ``cu_seqlens`` and walks the
+        chunk tables tightly, so every cell it visits has to hold a valid
+        page: a padded ``row * width`` grid would land a row that follows a
+        short row on the previous row's -1 padding and the recurrence would
+        scatter the state to a negative page -- a wild device write.
+        """
+        subject = self.subject
+        rows, slots = 2, 33
+        for widths_pair in ([32, 0], [32, 13], [14, 17], [15, 18], [1, 32], [33, 33]):
+            widths = torch.tensor(widths_pair)
+            state = torch.arange(rows * slots, dtype=torch.int32).view(rows, slots)
+            parent = torch.cat([state[:, :1], state[:, :-1]], dim=1)
+            packed_state = subject._pack_tree_rows_to_tokens(state, widths, slots)
+            packed_parent = subject._pack_tree_rows_to_tokens(parent, widths, slots)
+            plan = subject.compute_tree_verify_plan(widths, packed_state, packed_parent, 99)
+            self.assertIsNotNone(plan)
+            self.assertEqual(plan.num_chunks, 1)
+            chunk = plan.chunks[0]
+            self.assertEqual(chunk.cu_seqlens.tolist(), [0] + list(widths_pair))
+            # Walk the tables exactly like the kernel does.
+            start = 0
+            for count in widths_pair:
+                for p in range(start, start + count):
+                    token = int(chunk.token_indices[p])
+                    self.assertGreaterEqual(int(chunk.state_indices[p]), 0, (widths_pair, p))
+                    self.assertGreaterEqual(int(chunk.init_state_indices[p]), 0, (widths_pair, p))
+                    self.assertEqual(int(chunk.out_indices[p]), token)
+                    self.assertEqual(int(chunk.state_indices[p]), int(packed_state.reshape(-1)[token]))
+                    self.assertEqual(int(chunk.init_state_indices[p]), int(packed_parent.reshape(-1)[token]))
+                start += count
 
     def test_no_spec_step_neutralizes_previous_chunk_lengths(self):
         subject = self.subject

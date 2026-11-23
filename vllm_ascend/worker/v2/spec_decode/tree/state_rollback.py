@@ -462,12 +462,14 @@ class TreeVerifyChunk:
     row. Parents precede their children and are addressed through saved state
     pages. Production callers use ``width=slots`` for one whole-tree chunk.
 
-    The chunk's token dim is ``rows * width`` and is addressed as a padded grid:
-    row ``r`` holds the nodes it owns in cells ``[r * width, r * width + length)``
-    and the remaining cells of that row are padding. The kernel never reads
-    padding -- ``cu_seqlens`` gives every row its prefix length and a row of
-    length 0 is skipped -- so the op sees the same shapes whatever the per-row
-    widths are, which is what a full CUDA graph needs.
+    The chunk's token dim is ``rows * width`` and is packed tight: row ``r``
+    holds the nodes it owns in cells ``[start(r), start(r) + length)`` where
+    ``start`` is the running cumsum of the per-row lengths -- exactly the
+    offsets the kernel's ``cu_seqlens`` accumulation walks. Cells past the
+    last owned token are padding. The kernel never reads padding --
+    ``cu_seqlens`` gives every row its prefix length and a row of length 0 is
+    skipped -- so the op sees the same shapes whatever the per-row widths
+    are, which is what a full CUDA graph needs.
 
     Attributes:
         token_indices: ``[rows * width]`` int64, gather into the step's *packed*
@@ -684,28 +686,42 @@ def compute_tree_verify_plan(
     # keeps the gather in bounds.
     tokens = torch.where(owned, tokens, torch.zeros_like(tokens))
 
+    # The kernel walks every chunk's tables with tight row offsets accumulated
+    # from ``cu_seqlens`` (``seq_start = sum(lengths of the preceding rows)``),
+    # so the rows have to be laid out back to back, NOT on a padded
+    # ``row * width`` grid. A padded grid only coincides with the tight walk
+    # when every row is full width; a shorter row would shift every following
+    # row onto the previous row's padding (-1 state pages) and the kernel
+    # would scatter the recurrence to a negative page -- a wild device write.
+    tight_starts = torch.cumsum(row_lengths, dim=1) - row_lengths
+    dest = tight_starts[:, :, None] + cells[None, None, :]
+
     flat_state = state_indices.reshape(-1)
     flat_init = init_state_indices.reshape(-1)
-    minus_one = torch.tensor(-1, dtype=torch.int32, device=device)
-    scratch = torch.arange(rows * width, device=device, dtype=torch.long) + scratch_base
+    capacity = rows * width
+    scratch = torch.arange(capacity, device=device, dtype=torch.long) + scratch_base
     chunks = []
     for index in range(chunk_starts.numel()):
-        chunk_tokens = tokens[index].reshape(-1)
         chunk_owned = owned[index].reshape(-1)
+        chunk_dest = dest[index].reshape(-1)[chunk_owned]
+        # Owned cells only: their packed token offsets double as the gather
+        # indices into the token-major state tables. The clamped zeros of the
+        # padding cells are masked out here, so the gather stays in bounds.
+        chunk_tokens = tokens[index].reshape(-1)[chunk_owned]
+        token_indices = torch.zeros(capacity, dtype=torch.long, device=device)
+        chunk_state = torch.full((capacity,), -1, dtype=torch.int32, device=device)
+        chunk_init = torch.full((capacity,), -1, dtype=torch.int32, device=device)
+        out_indices = scratch.clone()
+        token_indices[chunk_dest] = chunk_tokens
+        chunk_state[chunk_dest] = flat_state.index_select(0, chunk_tokens)
+        chunk_init[chunk_dest] = flat_init.index_select(0, chunk_tokens)
+        out_indices[chunk_dest] = chunk_tokens
         chunks.append(
             TreeVerifyChunk(
-                token_indices=chunk_tokens,
-                state_indices=torch.where(
-                    chunk_owned,
-                    flat_state.index_select(0, chunk_tokens),
-                    minus_one,
-                ),
-                init_state_indices=torch.where(
-                    chunk_owned,
-                    flat_init.index_select(0, chunk_tokens),
-                    minus_one,
-                ),
-                out_indices=torch.where(chunk_owned, chunk_tokens, scratch),
+                token_indices=token_indices,
+                state_indices=chunk_state,
+                init_state_indices=chunk_init,
+                out_indices=out_indices,
                 cu_seqlens=torch.cat(
                     (
                         torch.zeros(1, dtype=torch.int32, device=device),
