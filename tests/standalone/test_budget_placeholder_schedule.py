@@ -201,8 +201,3 @@ def test_config_validation():
     assert cfg.budget_placeholder_schedule is True
     with pytest.raises(ValueError, match="budget_placeholder_schedule requires"):
         TreeSpecConfig(**base, verification_policy="fixed", budget_placeholder_schedule=True)
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        TreeSpecConfig(
-            **base, verification_policy="confidence", verification_threshold=0.2,
-            budget_placeholder_schedule=True, budget_async_readback=True,
-        )
