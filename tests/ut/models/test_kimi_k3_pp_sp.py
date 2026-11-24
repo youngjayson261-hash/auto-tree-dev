@@ -585,6 +585,7 @@ def test_host_positions_after_rejection_or_chunk(
         methods={
             "NPUModelRunner": {
                 "_can_skip_spec_cpu_length_sync",
+                "_can_skip_spec_cpu_length_sync_uncached",
                 "postprocess_sampled",
                 "postprocess_num_computed_tokens",
                 "_update_seq_lens_cpu",

@@ -493,6 +493,52 @@ class NPUModelRunner(GPUModelRunner):
         if not self._tree_budget_enabled:
             return
 
+        # The runtime admission below is a pure function of the loaded
+        # model/scorer/builder identity, the sampler's static processor
+        # pipeline and the immutable launch configuration; only the
+        # per-request sampling-parameter gates vary between calls. Prove the
+        # static part once per runner (the uncached pass raises on any static
+        # violation) and re-check just the request gates on later calls:
+        # add_requests runs this once per step even with no new requests.
+        static_processors_ok = getattr(self, "_tree_confidence_static", None)
+        if static_processors_ok is None:
+            self._tree_confidence_static = self._validate_tree_confidence_runtime_uncached(sampling_params)
+            return
+
+        from vllm.sampling_params import SamplingType
+
+        processors_supported = static_processors_ok and all(
+            p.presence_penalty == 0
+            and p.frequency_penalty == 0
+            and p.repetition_penalty == 1
+            and p.min_tokens == 0
+            and not p.logit_bias
+            and not p.allowed_token_ids
+            and not p.bad_words
+            for p in sampling_params
+        )
+        greedy = all(p.sampling_type == SamplingType.GREEDY for p in sampling_params)
+        grammar = any(p.structured_outputs is not None for p in sampling_params)
+        failures = tuple(
+            name
+            for passed, name in (
+                (greedy, "greedy"),
+                (not grammar, "grammar"),
+                (processors_supported, "processors"),
+            )
+            if not passed
+        )
+        if failures:
+            raise ValueError("confidence unsupported: " + ",".join(failures))
+
+    def _validate_tree_confidence_runtime_uncached(self, sampling_params=()) -> bool:
+        """Full runtime admission, executed once per runner.
+
+        Returns the static processor-pipeline verdict for the caller to
+        cache; raises ValueError on any violated gate with the same message
+        the per-call path produced before the static parts were cached.
+        """
+
         # Import confidence-only model bindings after native model loading.
         from vllm.sampling_params import SamplingType
         from vllm.v1.worker.gpu.sample.sampler import BadWordsState, LogitBiasState, PenaltiesState
@@ -557,20 +603,20 @@ class NPUModelRunner(GPUModelRunner):
                 bool(full_vocab),
                 confidence_source,
             )
-        processors_supported = (
+        static_processors_ok = (
             tuple(type(p) for p in self.sampler.logits_processors) == (LogitBiasState, PenaltiesState, BadWordsState)
             and not self.sampler.thinking_budget_state.enabled
             and self.sampler.trace_replay_state is None
-            and all(
-                p.presence_penalty == 0
-                and p.frequency_penalty == 0
-                and p.repetition_penalty == 1
-                and p.min_tokens == 0
-                and not p.logit_bias
-                and not p.allowed_token_ids
-                and not p.bad_words
-                for p in sampling_params
-            )
+        )
+        processors_supported = static_processors_ok and all(
+            p.presence_penalty == 0
+            and p.frequency_penalty == 0
+            and p.repetition_penalty == 1
+            and p.min_tokens == 0
+            and not p.logit_bias
+            and not p.allowed_token_ids
+            and not p.bad_words
+            for p in sampling_params
         )
         cfg = self.vllm_config
         finegrained_tp = getattr(getattr(self, "ascend_config", None), "finegrained_tp_config", None)
@@ -609,6 +655,7 @@ class NPUModelRunner(GPUModelRunner):
         speculator._tree_full_vocab_size = expected_vocab
         speculator._tree_dflash2_confidence_proven = dflash2_proof is not None
         speculator._tree_dflash2_confidence_proof = dflash2_proof
+        return static_processors_ok
 
 
     def _restore_replicated_draft_target_states(self) -> None:
@@ -1917,6 +1964,18 @@ class NPUModelRunner(GPUModelRunner):
 
     def _can_skip_spec_cpu_length_sync(self) -> bool:
         """Allow device lengths for supported speculative-decoding paths."""
+        # Called several times per step; every input is a runner-lifetime
+        # invariant (launch config, loaded attention backends). Cache positive
+        # verdicts only: a False may legitimately become True while backends
+        # are still being attached during startup, never the reverse.
+        if getattr(self, "_spec_cpu_length_sync_skippable", False):
+            return True
+        result = self._can_skip_spec_cpu_length_sync_uncached()
+        if result:
+            self._spec_cpu_length_sync_skippable = True
+        return result
+
+    def _can_skip_spec_cpu_length_sync_uncached(self) -> bool:
         if self.sync_spec_pp_cpu_counts:
             return False
 

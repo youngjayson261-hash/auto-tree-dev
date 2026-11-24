@@ -7,7 +7,7 @@ import ast
 import importlib.util
 import unittest
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import MethodType, ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 
@@ -36,16 +36,27 @@ class BadWordsState:
 
 
 def load_validation_method():
+    """Load the cached runtime-admission pair and bind them like the class does."""
     path = Path(__file__).resolve().parents[4] / "vllm_ascend/worker/v2/model_runner.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    method = next(
-        node
+    methods = {
+        node.name: node
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "_validate_tree_confidence_runtime"
-    )
+        if isinstance(node, ast.FunctionDef)
+        and node.name in ("_validate_tree_confidence_runtime", "_validate_tree_confidence_runtime_uncached")
+    }
+    if set(methods) != {"_validate_tree_confidence_runtime", "_validate_tree_confidence_runtime_uncached"}:
+        raise AssertionError("expected the cached runtime admission method pair")
     namespace = {}
-    exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), "exec"), namespace)
-    return namespace[method.name]
+    exec(compile(ast.Module(body=list(methods.values()), type_ignores=[]), str(path), "exec"), namespace)
+
+    def validate(runner, sampling_params=()):
+        runner._validate_tree_confidence_runtime_uncached = MethodType(
+            namespace["_validate_tree_confidence_runtime_uncached"], runner
+        )
+        return namespace["_validate_tree_confidence_runtime"](runner, sampling_params)
+
+    return validate
 
 
 class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
@@ -181,6 +192,145 @@ class TestTreeConfidenceRuntimeCompatibility(unittest.TestCase):
         self.assertTrue(self.runner._tree_confidence_requested)
         self.validate(self.runner)
         self.assertIsNone(self.facts)
+
+
+class TestTreeConfidenceRuntimeCaching(unittest.TestCase):
+    """The static admission must run once per runner; request gates stay live."""
+
+    def setUp(self):
+        self.validate = load_validation_method()
+        self.fact_calls = []
+        self.model = DominoModel()
+        self.model.config = SimpleNamespace(vocab_size=8, draft_vocab_size=8)
+        self.model.draft_id_to_target_id = None
+        self.model.logits_processor = SimpleNamespace(vocab_size=8, org_vocab_size=8)
+        self.runner = SimpleNamespace(
+            _tree_budget_enabled=True,
+            speculator=SimpleNamespace(
+                model=self.model,
+                tree_builder=SimpleNamespace(scorer=IndependentScorer()),
+                _tree_graphs={},
+                enable_adaptive_verification=False,
+            ),
+            sampler=SimpleNamespace(
+                logits_processors=[LogitBiasState(), PenaltiesState(), BadWordsState()],
+                thinking_budget_state=SimpleNamespace(enabled=False),
+                trace_replay_state=None,
+            ),
+            vllm_config=SimpleNamespace(
+                scheduler_config=SimpleNamespace(async_scheduling=False),
+                parallel_config=SimpleNamespace(
+                    tensor_parallel_size=1,
+                    pipeline_parallel_size=1,
+                    data_parallel_size=1,
+                    prefill_context_parallel_size=1,
+                    decode_context_parallel_size=1,
+                ),
+                max_concurrent_batches=1,
+                model_config=SimpleNamespace(enforce_eager=True),
+            ),
+            model_state=SimpleNamespace(num_new_sampled_tokens_per_step=1),
+            ascend_config=SimpleNamespace(
+                finegrained_tp_config=SimpleNamespace(
+                    oproj_tensor_parallel_size=0,
+                    lmhead_tensor_parallel_size=0,
+                    embedding_tensor_parallel_size=0,
+                    mlp_tensor_parallel_size=0,
+                )
+            ),
+            adaptive_verification=None,
+        )
+        bindings = {
+            "vllm.sampling_params": {"SamplingType": SimpleNamespace(GREEDY=0)},
+            "vllm.v1.worker.gpu.sample.sampler": {
+                "LogitBiasState": LogitBiasState,
+                "PenaltiesState": PenaltiesState,
+                "BadWordsState": BadWordsState,
+            },
+            "vllm_ascend.models.qwen3_domino": {"AscendDominoQwen3ForCausalLM": DominoModel},
+            "vllm_ascend.worker.v2.spec_decode.tree.scoring": {
+                "IndependentScorer": IndependentScorer,
+                "DominoScorer": DominoScorer,
+            },
+            "vllm_ascend.worker.v2.spec_decode.tree.budget_policy": {
+                "admit_base_confidence_scorer": lambda scorer, independent, domino, full_vocab: (
+                    full_vocab and scorer in (independent, domino)
+                ),
+                "validate_runtime_facts": self.record_facts,
+            },
+        }
+        prefix_path = Path(__file__).resolve().parents[4] / "vllm_ascend/worker/v2/spec_decode/tree/prefix_graph.py"
+        prefix_spec = importlib.util.spec_from_file_location("_caching_prefix_graph", prefix_path)
+        prefix_module = importlib.util.module_from_spec(prefix_spec)
+        prefix_spec.loader.exec_module(prefix_module)
+        bindings["vllm_ascend.worker.v2.spec_decode.tree.prefix_graph"] = {
+            "prefix_graph_configured": prefix_module.prefix_graph_configured,
+        }
+        modules = {}
+        for name, attributes in bindings.items():
+            parts = name.split(".")
+            for length in range(1, len(parts) + 1):
+                module_name = ".".join(parts[:length])
+                if module_name not in modules:
+                    modules[module_name] = ModuleType(module_name)
+                    modules[module_name].__path__ = []
+            modules[name].__dict__.update(attributes)
+        self.module_patch = patch.dict("sys.modules", modules)
+        self.module_patch.start()
+        self.addCleanup(self.module_patch.stop)
+
+    def record_facts(self, **facts):
+        self.fact_calls.append(facts)
+        if not facts["scorer_admitted"]:
+            raise ValueError("confidence scorer rejected")
+
+    @staticmethod
+    def params(**overrides):
+        defaults = dict(
+            presence_penalty=0,
+            frequency_penalty=0,
+            repetition_penalty=1,
+            min_tokens=0,
+            logit_bias=None,
+            allowed_token_ids=None,
+            bad_words=None,
+            sampling_type=0,
+            structured_outputs=None,
+        )
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    def test_static_admission_runs_once_across_steps(self):
+        self.validate(self.runner)
+        self.validate(self.runner)
+        self.validate(self.runner, (self.params(),))
+        self.assertEqual(len(self.fact_calls), 1, "static admission re-ran after caching")
+
+    def test_static_failure_is_not_cached(self):
+        self.model.config.draft_vocab_size = 4
+        with self.assertRaisesRegex(ValueError, "scorer rejected"):
+            self.validate(self.runner)
+        self.assertFalse(hasattr(self.runner, "_tree_confidence_static"))
+        self.model.config.draft_vocab_size = 8
+        self.validate(self.runner)
+        self.assertEqual(len(self.fact_calls), 2)
+
+    def test_dynamic_gates_stay_live_after_caching(self):
+        self.validate(self.runner)
+        with self.assertRaisesRegex(ValueError, "confidence unsupported: greedy"):
+            self.validate(self.runner, (self.params(sampling_type=1),))
+        with self.assertRaisesRegex(ValueError, "confidence unsupported: processors"):
+            self.validate(self.runner, (self.params(presence_penalty=0.5),))
+        with self.assertRaisesRegex(ValueError, "confidence unsupported: grammar"):
+            self.validate(self.runner, (self.params(structured_outputs=object()),))
+
+    def test_dynamic_failures_keep_check_order(self):
+        self.validate(self.runner)
+        with self.assertRaisesRegex(ValueError, "confidence unsupported: greedy,grammar,processors"):
+            self.validate(
+                self.runner,
+                (self.params(sampling_type=1, presence_penalty=0.5, structured_outputs=object()),),
+            )
 
 
 if __name__ == "__main__":

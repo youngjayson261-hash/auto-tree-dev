@@ -536,10 +536,14 @@ class AscendModelState(DefaultModelState):
         tree_visibility = input_batch.tree_visibility
         from vllm_ascend.worker.v2.spec_decode.tree.prefix_graph import prefix_graph_configured
 
+        # Static launch-configuration admission, proven once per instance.
+        prefix_admitted = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_admitted is None:
+            prefix_admitted = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
         if (
             not for_capture
             and not getattr(input_batch, "is_dummy", False)
-            and prefix_graph_configured(self.vllm_config)
+            and prefix_admitted
             and not bool(np.any(input_batch.is_prefilling_np[: input_batch.num_reqs]))
         ):
             if input_batch.num_reqs != 1:

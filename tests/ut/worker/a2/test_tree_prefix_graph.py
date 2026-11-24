@@ -79,11 +79,20 @@ class Admission(unittest.TestCase):
         fixture.validate(fixture.runner)
         self.assertTrue(fixture.facts["graph_admitted"])
         policy.validate_runtime_facts(**fixture.facts)
-        fixture.runner.vllm_config.compilation_config.cudagraph_capture_sizes = [17, 65]
-        fixture.validate(fixture.runner)
-        self.assertFalse(fixture.facts["graph_admitted"])
+        # Static admission is cached per runner: a changed launch
+        # configuration means a new runner, so re-validate on a fresh fixture.
+        fixture2 = compat.TestTreeConfidenceRuntimeCompatibility("test_native_config_full_vocab_is_admitted")
+        fixture2.setUp()
+        self.addCleanup(fixture2.doCleanups)
+        binding2 = sys.modules["vllm_ascend.worker.v2.spec_decode.tree.budget_policy"]
+        binding2.admit_verification_confidence_scorer = policy.admit_verification_confidence_scorer
+        fixture2.runner.speculator._tree_confidence_source = "scorer_logprob"
+        fixture2.runner.vllm_config = config()
+        fixture2.runner.vllm_config.compilation_config.cudagraph_capture_sizes = [17, 65]
+        fixture2.validate(fixture2.runner)
+        self.assertFalse(fixture2.facts["graph_admitted"])
         with self.assertRaisesRegex(ValueError, "eager"):
-            policy.validate_runtime_facts(**fixture.facts)
+            policy.validate_runtime_facts(**fixture2.facts)
 
     def test_supported_five_and_nine_gears(self):
         cfg = config()

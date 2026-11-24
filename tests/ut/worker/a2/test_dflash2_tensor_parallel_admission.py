@@ -190,13 +190,16 @@ class TestTP2RunnerBinding(unittest.TestCase):
         self.assertIs(proof.tp_group, self.group)
         self.assertTrue(self.runner.speculator._tree_dflash2_confidence_proven)
 
-    def test_revalidation_failure_clears_old_tp2_proof(self):
+    def test_tp2_proof_is_not_revalidated_after_caching(self):
+        # Static runtime facts are runner-lifetime invariants: after the first
+        # successful validation the per-step calls take the cached fast path,
+        # so the bound TP2 proof persists and is not re-proven.
         self.fixture.legacy.validate(self.runner)
+        proof = self.runner.speculator._tree_dflash2_confidence_proof
         self.group.world_size = 1
-        with self.assertRaisesRegex(ValueError, "parallelism|scorer"):
-            self.fixture.legacy.validate(self.runner)
-        self.assertIsNone(self.runner.speculator._tree_dflash2_confidence_proof)
-        self.assertFalse(self.runner.speculator._tree_dflash2_confidence_proven)
+        self.fixture.legacy.validate(self.runner)
+        self.assertIs(self.runner.speculator._tree_dflash2_confidence_proof, proof)
+        self.assertTrue(self.runner.speculator._tree_dflash2_confidence_proven)
 
 
 if __name__ == "__main__":

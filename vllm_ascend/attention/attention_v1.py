@@ -1013,7 +1013,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
         key, value, block_size, block_table, actual_seq_lengths_kv = self._get_fia_params(key, value, attn_metadata)
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         bsnd = self._tree_fia_bsnd_shape(num_tokens, attn_metadata.num_decodes)
-        prefix_gear = prefix_graph_configured(self.vllm_config)
+        # Static launch-configuration admission, proven once per instance
+        # (same pattern as the metadata-build path above).
+        prefix_gear = getattr(self, "_tree_prefix_graph_admitted", None)
+        if prefix_gear is None:
+            prefix_gear = self._tree_prefix_graph_admitted = prefix_graph_configured(self.vllm_config)
         if prefix_gear:
             if attn_metadata.num_prefills != 0 or attn_metadata.attn_mask is None or attn_metadata.attn_mask.ndim != 4:
                 raise RuntimeError("prefix graph capture requires a real tree mask")

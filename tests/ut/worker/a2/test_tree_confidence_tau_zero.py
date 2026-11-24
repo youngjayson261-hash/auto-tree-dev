@@ -9,7 +9,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import MethodType, ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -30,6 +30,29 @@ def source_method(path, name, namespace=None):
     scope.update(namespace or {})
     exec(compile(ast.Module(body=[nodes[0]], type_ignores=[]), str(path), "exec"), scope)
     return scope[name]
+
+
+def load_validate_pair():
+    """Load the cached runtime-admission pair and bind them like the class does."""
+    tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
+    nodes = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name in ("_validate_tree_confidence_runtime", "_validate_tree_confidence_runtime_uncached")
+    }
+    if len(nodes) != 2:
+        raise AssertionError("expected the cached runtime admission method pair")
+    scope = {"SchedulerOutput": object, "BatchReqState": object}
+    exec(compile(ast.Module(body=list(nodes.values()), type_ignores=[]), str(RUNNER), "exec"), scope)
+
+    def validate(runner, sampling_params=()):
+        runner._validate_tree_confidence_runtime_uncached = MethodType(
+            scope["_validate_tree_confidence_runtime_uncached"], runner
+        )
+        return scope["_validate_tree_confidence_runtime"](runner, sampling_params)
+
+    return validate
 
 
 def source_guard(path, method_name, marker, namespace=None):
@@ -116,7 +139,7 @@ class TestTauZeroRuntimeAdmission(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("tau_zero_actual_policy", POLICY)
         self.policy = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.policy)
-        self.validate = source_method(RUNNER, "_validate_tree_confidence_runtime")
+        self.validate = load_validate_pair()
         model = DominoModel()
         model.config = SimpleNamespace(vocab_size=8, draft_vocab_size=8)
         model.draft_id_to_target_id = None

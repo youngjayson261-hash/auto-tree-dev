@@ -38,6 +38,7 @@ def runner_cls(mamba_state_cls):
         in {
             "__init__",
             "_can_skip_spec_cpu_length_sync",
+            "_can_skip_spec_cpu_length_sync_uncached",
             "postprocess_sampled",
             "postprocess_num_computed_tokens",
             "_update_seq_lens_cpu",

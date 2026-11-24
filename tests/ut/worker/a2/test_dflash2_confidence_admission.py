@@ -183,11 +183,23 @@ class TestDFlash2ModelRunnerAdmission(unittest.TestCase):
         self.assertEqual(self.runner.speculator._tree_full_vocab_size, 8)
         self.assertEqual(self.runner.speculator._tree_dflash2_confidence_proof.score_domain, "selector_lattice")
 
-    def test_rejected_revalidation_clears_previous_proof(self):
+    def test_static_admission_is_not_revalidated_after_caching(self):
+        # The static admission runs once per runner: after a successful first
+        # validation the per-step calls take the cached fast path, so a (in
+        # production impossible) later mutation of the model is not
+        # re-inspected and the bound proof persists.
         self.legacy.validate(self.runner)
+        proof = self.runner.speculator._tree_dflash2_confidence_proof
+        self.model.draft_id_to_target_id = [0]
+        self.legacy.validate(self.runner)
+        self.assertTrue(self.runner.speculator._tree_dflash2_confidence_proven)
+        self.assertIs(self.runner.speculator._tree_dflash2_confidence_proof, proof)
+
+    def test_rejected_first_validation_caches_nothing(self):
         self.model.draft_id_to_target_id = [0]
         with self.assertRaisesRegex(ValueError, "scorer"):
             self.legacy.validate(self.runner)
+        self.assertFalse(hasattr(self.runner, "_tree_confidence_static"))
         self.assertFalse(self.runner.speculator._tree_dflash2_confidence_proven)
         self.assertIsNone(self.runner.speculator._tree_dflash2_confidence_proof)
 
