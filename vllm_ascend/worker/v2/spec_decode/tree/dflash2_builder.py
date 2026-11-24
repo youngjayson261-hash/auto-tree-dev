@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """DFlash2 beam construction with separate candidate pools and frontiers."""
 
+import json
+import os
+
 import torch
 
 from vllm_ascend.worker.v2.spec_decode.tree.base_confidence import prepare_base_confidence, prepare_scorer_confidence
@@ -78,6 +81,52 @@ class DFlash2BeamTreeBuilder(TreeBuilder):
             origin_pool = start + origin_candidate
         state.frontier = start + selected
         return num_added, origin_frontier, origin_pool
+
+    def _dump_built_tree(self, state, root_token_ids, num_nodes, width) -> None:
+        """Snapshot the full candidate pool for offline tree-shape analysis.
+
+        Gated by VLLM_ASCEND_TREE_DUMP and armed by the speculator only after
+        graph capture, so capture-time builds never dump. Analysis runs are
+        bs=1: row 0 is dumped. Pool slot j maps to parents/path_scores slot
+        j+1 (slot 0 is the root). The synchronous D2H perturbs timing; never
+        use dump runs for performance conclusions.
+        """
+        path = os.environ.get("VLLM_ASCEND_TREE_DUMP") or None
+        if path is None:
+            return
+        try:
+            from vllm.distributed import get_tp_group
+
+            if get_tp_group().rank != 0:
+                return
+        except Exception:
+            pass
+        try:
+            fh = getattr(self, "_tree_dump_file", None)
+            if fh is None:
+                fh = open(path, "a", encoding="utf-8")
+                self._tree_dump_file = fh
+            n = int(state.num_nodes.item()) if torch.is_tensor(state.num_nodes) else int(state.num_nodes)
+            row = dict(
+                step=getattr(self, "_tree_dump_step", 0),
+                root_token=int(root_token_ids[0].item()),
+                num_pool=n,
+                num_selected=int(num_nodes),
+                budget=int(self.budget),
+                frontier_width=int(width),
+                depth_penalty=float(self.depth_penalty or 0.0),
+                keep_origin_chain=bool(self.keep_origin_chain),
+                tokens=state.tokens[0, :n].tolist(),
+                depths=state.depths[0, :n].tolist(),
+                parents=state.parents[0, : n + 1].tolist(),
+                path_scores=[round(float(x), 6) for x in state.path_scores[0, : n + 1].tolist()],
+            )
+            fh.write(json.dumps(row, separators=(",", ":")) + "\n")
+            fh.flush()
+            self._tree_dump_step = getattr(self, "_tree_dump_step", 0) + 1
+        except Exception:
+            # Analysis dump must never break serving.
+            pass
 
     def build(
         self,
@@ -162,4 +211,6 @@ class DFlash2BeamTreeBuilder(TreeBuilder):
             priority = priority.clone()
             priority.scatter_(1, torch.stack(origin_pools, dim=1) - 1, float("inf"))
         self.num_selected_nodes = num_nodes
+        if getattr(self, "_tree_dump_armed", False):
+            self._dump_built_tree(state, root_token_ids, num_nodes, width)
         return finalize_tree_layout_from_state(out, priority, state.tokens, state.depths, state.parents, num_nodes)

@@ -1,4 +1,5 @@
 import copy
+import os
 from typing import Any
 
 import torch
@@ -601,6 +602,8 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
                 if missing:
                     raise RuntimeError(f"FULL DFlash2 tree KV compaction capture failed for batches {sorted(missing)}")
         self._prepare_tree_budget_selector_graphs()
+        if self.tree_builder is not None and os.environ.get("VLLM_ASCEND_TREE_DUMP"):
+            self.tree_builder._tree_dump_armed = True
 
     def _prepare_tree_budget_selector_graphs(self) -> None:
         runtime = self._tree_budget_runtime
@@ -844,6 +847,9 @@ class AscendTreeSpeculator(AscendDFlashSpeculator):
         # Match the actual request count, independently of the padded batch
         # used by the draft-forward graph. Uncaptured sizes use eager build.
         graph = self._tree_graphs.get(num_reqs)
+        if graph is not None and getattr(self.tree_builder, "_tree_dump_armed", False):
+            # Analysis dump needs the eager build so the hook observes the pool.
+            graph = None
         self.tree_graph_stats.record_lookup("tree", graph is not None)
         if graph is not None:
             graph.replay()
