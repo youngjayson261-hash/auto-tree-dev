@@ -69,6 +69,13 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         self._width_trace_path = os.environ.get("VLLM_ASCEND_BUDGET_WIDTH_TRACE") or None
         self._width_trace_file = None
         self._width_trace_step = 0
+        # Per-step overhead timing trace (env-gated): each placeholder resolve
+        # flushes one jsonl row with the cost of every lifecycle segment
+        # (seal/publish/patch-wait/patch-work/trace/handoff/admission).
+        self._timing_trace_path = os.environ.get("VLLM_ASCEND_BUDGET_TIMING_TRACE") or None
+        self._timing_trace_file = None
+        self._timing_step = 0
+        self._timing_pending: dict = {}
         # Stats-correction handoff for placeholder mode (env-gated): the worker
         # drops this step's true widths here so the core-side scheduler stats
         # patch can count real widths instead of placeholder widths.
@@ -109,9 +116,12 @@ class TreeDraftTokensHandler(DraftTokensHandler):
             return
         if self._budget_sealed:
             raise RuntimeError("confidence budget already sealed")
+        t0 = time.perf_counter() if self._timing_trace_path else None
         self._budget_produced.record()
         self._seal_budget_copy()
         self._budget_sealed = True
+        if t0 is not None:
+            self._timing_pending["seal_ms"] = (time.perf_counter() - t0) * 1e3
 
     def get_draft_tokens(self) -> DraftTokenIds | None:
         if not self._budget_enabled:
@@ -133,9 +143,13 @@ class TreeDraftTokensHandler(DraftTokensHandler):
             # packet D2H enqueued at seal time keeps overlapping underneath.
             if self._placeholder_outstanding is not None:
                 raise RuntimeError("confidence placeholder publication already outstanding")
+            t0 = time.perf_counter() if self._timing_trace_path else None
             self._placeholder_outstanding = pending
             full = self.speculator.budget
-            return DraftTokenIds(list(pending.req_ids), [[-1] * full for _ in pending.req_ids])
+            result = DraftTokenIds(list(pending.req_ids), [[-1] * full for _ in pending.req_ids])
+            if t0 is not None:
+                self._timing_pending["publish_ms"] = (time.perf_counter() - t0) * 1e3
+            return result
         try:
             rows = self._read_budget_rows(pending)
             accepted = []
@@ -180,6 +194,7 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         wait_start = time.perf_counter()
         rows = self._read_budget_rows(outstanding)
         wait_s = time.perf_counter() - wait_start
+        t0 = time.perf_counter() if self._timing_trace_path else None
         try:
             full = self.speculator.budget
             spec_tokens = scheduler_output.scheduled_spec_decode_tokens
@@ -218,8 +233,17 @@ class TreeDraftTokensHandler(DraftTokensHandler):
                 self._budget_stats.record_budget_delivery(
                     self.speculator.tree_builder, outstanding.req_ids, rows, accepted
                 )
+            if t0 is not None:
+                self._timing_pending["patch_work_ms"] = (time.perf_counter() - t0) * 1e3
+                t0 = time.perf_counter()
             self._record_width_rows(outstanding, rows, accepted, "placeholder")
+            if t0 is not None:
+                self._timing_pending["trace_ms"] = (time.perf_counter() - t0) * 1e3
+                t0 = time.perf_counter()
             self._publish_width_patch(accepted)
+            if t0 is not None:
+                self._timing_pending["handoff_ms"] = (time.perf_counter() - t0) * 1e3
+            self._flush_timing_row(outstanding, accepted, "placeholder", wait_s)
         finally:
             self._pending_budget = None
             self._budget_sealed = False
@@ -281,6 +305,25 @@ class TreeDraftTokensHandler(DraftTokensHandler):
             os.replace(tmp, os.path.join(self._width_patch_dir, "pending_widths.json"))
         except Exception:
             # Stats correction must never break serving.
+            pass
+
+    def _flush_timing_row(self, pending: _PendingBudget, accepted: list, mode: str, wait_s: float) -> None:
+        """Append one per-step overhead row (env-gated); never breaks serving."""
+        if not self._timing_trace_path or not self._trace_rank_zero():
+            return
+        try:
+            if self._timing_trace_file is None:
+                self._timing_trace_file = open(self._timing_trace_path, "a", encoding="utf-8")
+            row = dict(ts=time.time(), step=self._timing_step, mode=mode,
+                       req_ids=list(pending.req_ids),
+                       budgets=[budget for _, _, budget in accepted],
+                       patch_wait_ms=wait_s * 1e3,
+                       **self._timing_pending)
+            self._timing_pending = {}
+            self._timing_step += 1
+            self._timing_trace_file.write(json.dumps(row, separators=(",", ":")) + "\n")
+            self._timing_trace_file.flush()
+        except Exception:
             pass
 
     def _seal_budget_copy(self) -> None:

@@ -19,6 +19,7 @@
 
 import inspect
 import logging
+import time
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from copy import deepcopy
 from typing import Any
@@ -795,9 +796,14 @@ class NPUModelRunner(GPUModelRunner):
 
     def add_requests(self, scheduler_output: SchedulerOutput) -> None:
         if self._tree_budget_enabled:
+            handler = self.draft_tokens_handler
+            timing = getattr(handler, "_timing_trace_path", None)
+            t0 = time.perf_counter() if timing else None
             self._validate_tree_confidence_runtime(
                 tuple(req.sampling_params for req in scheduler_output.scheduled_new_reqs)
             )
+            if t0 is not None:
+                handler._timing_pending["admission_ms"] = (time.perf_counter() - t0) * 1e3
         super().add_requests(scheduler_output)
         if self.tree_host_metadata is not None:
             self.tree_host_metadata.add_requests(scheduler_output.scheduled_new_reqs)
