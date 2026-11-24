@@ -286,6 +286,9 @@ class NPUModelRunner(GPUModelRunner):
                     verification_policy=self.ascend_config.tree_spec_config.verification_policy,
                     threshold=self.ascend_config.tree_spec_config.verification_threshold,
                     budget_stats=self.speculator.tree_budget_stats,
+                    budget_placeholder_schedule=getattr(
+                        self.ascend_config.tree_spec_config, "budget_placeholder_schedule", False
+                    ),
                 )
         # AscendInputBuffers has extra `seq_lens_cpu` attribute.
         # so reinitialize input_buffers here.
@@ -1075,6 +1078,14 @@ class NPUModelRunner(GPUModelRunner):
         randomize_inputs: bool = False,
     ):
         self._cpp_execution_time_ms = None
+        if not dummy_run:
+            # Confidence placeholder scheduling: patch the true budget width
+            # into the scheduler output before the upstream flow reads it, so
+            # graph dispatch and input preparation observe synchronous-path
+            # shapes. No-op when the mode is off or nothing is outstanding.
+            resolve_placeholder = getattr(self.draft_tokens_handler, "resolve_placeholder_budget", None)
+            if resolve_placeholder is not None:
+                resolve_placeholder(scheduler_output)
         profiling_config = self.ascend_config.scheduler_config.profiling_chunk_config
         execution_start_time = _start_profiling_chunk_timing(
             profiling_config,

@@ -1468,6 +1468,11 @@ class TreeSpecConfig:
     verification_policy: str = "fixed"
     verification_threshold: float = 0.0
     verification_confidence_source: str = "base_full_vocab"
+    # Schedule on a full-width placeholder budget without waiting for the
+    # device-produced value, then patch the true width into the scheduler
+    # output right before the model executes the step. The executed step is
+    # bit-identical to a synchronous readback; only the host-side wait moves.
+    budget_placeholder_schedule: bool = False
 
     @property
     def confidence_verification_requested(self) -> bool:
@@ -1494,6 +1499,13 @@ class TreeSpecConfig:
     def _validate(self):
         if self.verification_confidence_source not in ("base_full_vocab", "scorer_logprob"):
             raise ValueError("verification_confidence_source must be base_full_vocab or scorer_logprob")
+        if type(self.budget_placeholder_schedule) is not bool:
+            raise ValueError("tree_spec_config.budget_placeholder_schedule must be a bool")
+        if self.budget_placeholder_schedule and not self.confidence_verification_enabled:
+            raise ValueError(
+                "tree_spec_config.budget_placeholder_schedule requires "
+                "verification_policy='confidence' with verification_threshold > 0"
+            )
         if self.enabled and (self.budget is None or self.topk is None):
             raise ValueError("tree_spec_config.budget and topk are required when enabled")
         if self.budget is not None and (self.budget < 0 or (self.enabled and self.budget == 0)):

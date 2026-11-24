@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, NamedTuple
 
 import torch
@@ -48,6 +49,7 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         verification_policy: str = "fixed",
         threshold: float = 0.0,
         budget_stats=None,
+        budget_placeholder_schedule: bool = False,
     ) -> None:
         validate_policy_config(verification_policy, threshold)
         super().__init__(device)
@@ -57,6 +59,8 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         self._budget_stats = budget_stats
         self._pending_budget: _PendingBudget | None = None
         self._budget_sealed = False
+        self._placeholder_mode = budget_placeholder_schedule is True
+        self._placeholder_outstanding: _PendingBudget | None = None
         if self._budget_enabled:
             self._budget_cpu = torch.empty((req_states.max_num_reqs, 2), dtype=torch.int32, pin_memory=True)
             self._budget_produced = torch.npu.Event()
@@ -108,6 +112,18 @@ class TreeDraftTokensHandler(DraftTokensHandler):
             return None
         if not self._budget_sealed:
             raise RuntimeError("confidence budget production is not sealed")
+        if self._placeholder_mode:
+            # Publish the full tree width without reading the device packet:
+            # the engine and scheduler never block on the current step's
+            # production. ``resolve_placeholder_budget`` patches the true width
+            # into the scheduler output right before the step executes, so the
+            # executed shapes stay bit-identical to the synchronous path. The
+            # packet D2H enqueued at seal time keeps overlapping underneath.
+            if self._placeholder_outstanding is not None:
+                raise RuntimeError("confidence placeholder publication already outstanding")
+            self._placeholder_outstanding = pending
+            full = self.speculator.budget
+            return DraftTokenIds(list(pending.req_ids), [[-1] * full for _ in pending.req_ids])
         try:
             rows = self._read_budget_rows(pending)
             accepted = []
@@ -129,6 +145,70 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         finally:
             self._pending_budget = None
             self._budget_sealed = False
+
+    def resolve_placeholder_budget(self, scheduler_output) -> float:
+        """Patch the true confidence width into a placeholder scheduler output.
+
+        The model runner calls this right before ``execute_model`` consumes
+        the output, so batch gathering, graph dispatch and input preparation
+        all observe the same per-request widths as a synchronous readback —
+        the placeholder value is a start permit only and never reaches
+        execution. Returns the patch wait in seconds (telemetry). No-op when
+        no placeholder publication is outstanding.
+        """
+        outstanding = self._placeholder_outstanding
+        if outstanding is None:
+            return 0.0
+        self._placeholder_outstanding = None
+        # The packet copy was enqueued a full engine handoff ago (seal of the
+        # producing step); this synchronize returns immediately in steady
+        # state. LAYOUT_ERROR still raises before launch, exactly like the
+        # synchronous path.
+        wait_start = time.perf_counter()
+        rows = self._read_budget_rows(outstanding)
+        wait_s = time.perf_counter() - wait_start
+        try:
+            full = self.speculator.budget
+            spec_tokens = scheduler_output.scheduled_spec_decode_tokens
+            num_scheduled = scheduler_output.num_scheduled_tokens
+            accepted = []
+            for req_id, slot, (budget, status) in zip(outstanding.req_ids, outstanding.slots, rows):
+                status = PolicyStatus(status)
+                if status == PolicyStatus.LAYOUT_ERROR or not 0 <= budget <= full:
+                    raise ValueError("invalid confidence budget or tree layout")
+                current_slot = self.req_states.req_id_to_index.get(req_id)
+                if current_slot is None:
+                    continue
+                if current_slot != slot:
+                    raise RuntimeError("confidence request slot changed before publication")
+                accepted.append((req_id, slot, budget))
+            total_delta = 0
+            for req_id, slot, budget in accepted:
+                self.req_states.tree_next_budget_cpu[slot] = budget
+                placeholder = spec_tokens.get(req_id)
+                if placeholder is None:
+                    # The draft is no longer scheduled (e.g. preempted between
+                    # publication and execution); the width is simply unused.
+                    continue
+                if len(placeholder) != full or any(token != -1 for token in placeholder):
+                    raise RuntimeError("confidence placeholder publication corrupted before patch")
+                if budget == full:
+                    continue
+                del placeholder[budget:]
+                delta = full - budget
+                if num_scheduled.get(req_id) != 1 + full:
+                    raise RuntimeError("confidence placeholder accounting drifted before patch")
+                num_scheduled[req_id] = 1 + budget
+                total_delta += delta
+            scheduler_output.total_num_scheduled_tokens -= total_delta
+            if self._budget_stats is not None and self._budget_stats.enabled:
+                self._budget_stats.record_budget_delivery(
+                    self.speculator.tree_builder, outstanding.req_ids, rows, accepted
+                )
+        finally:
+            self._pending_budget = None
+            self._budget_sealed = False
+        return wait_s
 
     def _seal_budget_copy(self) -> None:
         """Enqueue this step's packet D2H on the copy stream without blocking.
