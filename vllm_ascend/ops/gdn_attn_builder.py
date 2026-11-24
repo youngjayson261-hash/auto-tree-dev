@@ -2170,6 +2170,33 @@ class AscendGDNHostMetadataBuilder(AscendGDNAttentionMetadataBuilder):
             self.vllm_config.cache_config.mamba_cache_mode,
         )
         pages = table[:1, : tree.slots]
+        batch = tree.cropped_batch
+        if batch is not None and batch.add(tree, pages, self, metadata):
+            # The fused batch rewrites every device field of this group in
+            # one launch at the end of build_metadata; only the host-side
+            # descriptor updates remain, and finish() runs _finalize_metadata.
+            spec.spec_causal_conv1d.cache_indices = metadata.spec_state_indices_tensor
+            metadata.spec_token_indx = self.spec_token_indx[:query_width]
+            metadata.num_actual_tokens = query_width
+            metadata.num_spec_decode_tokens = query_width
+            if spec.verify_plan is not None:
+                plan_views = getattr(self, "_spec_verify_plan_views", None)
+                if plan_views is None:
+                    from vllm_ascend.worker.v2.spec_decode.tree.state_rollback import (
+                        TreeVerifyPlan,
+                        tree_verify_chunk_count,
+                    )
+
+                    plan_views = TreeVerifyPlan.views_from_buffers(
+                        self.spec_verify_plan_buffers,
+                        1,
+                        tree.slots,
+                        tree.slots,
+                        tree_verify_chunk_count(tree.slots, tree.slots),
+                    )
+                    self._spec_verify_plan_views = plan_views
+                spec.verify_plan = plan_views
+            return metadata
         metadata.num_accepted_tokens.copy_(accepted)
         metadata.spec_state_indices_tensor.copy_(tree.bind_state_indices(pages))
         spec.init_state_indices.copy_(tree.bind_init_state_indices(pages))

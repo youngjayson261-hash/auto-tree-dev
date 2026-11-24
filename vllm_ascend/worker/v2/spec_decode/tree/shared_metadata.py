@@ -17,7 +17,10 @@ from vllm_ascend.worker.v2.spec_decode.tree.state_rollback import (
 )
 
 if TYPE_CHECKING:
-    from vllm_ascend.ops.triton.spec_decode.tree.gdn_tree_pages import GDNTreePageBatch
+    from vllm_ascend.ops.triton.spec_decode.tree.gdn_tree_pages import (
+        GDNCroppedRefreshBatch,
+        GDNTreePageBatch,
+    )
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class SharedGDNTreeMetadata:
 
     request_id: str | None = None
     page_batch: "GDNTreePageBatch | None" = field(default=None, repr=False, compare=False)
+    cropped_batch: "GDNCroppedRefreshBatch | None" = field(default=None, repr=False, compare=False)
     _written_graph_inputs: set[int] = field(default_factory=set, init=False, repr=False, compare=False)
 
     @classmethod
@@ -82,6 +86,7 @@ class SharedGDNTreeMetadata:
         request_id: str | None = None,
         use_fused_topology: bool = False,
         page_batch: "GDNTreePageBatch | None" = None,
+        cropped_batch: "GDNCroppedRefreshBatch | None" = None,
     ) -> "SharedGDNTreeMetadata":
         if parents.ndim != 2 or parents.shape[0] != 1 or parents.shape[1] < 1:
             raise ValueError("Shared GDN tree metadata requires BS1 rootless parents [1, budget].")
@@ -138,6 +143,7 @@ class SharedGDNTreeMetadata:
                 invalid_slots=invalid_slots,
                 request_id=request_id,
                 page_batch=page_batch,
+                cropped_batch=cropped_batch,
             )
         chain_parents = torch.arange(slots - 1, device=device, dtype=torch.long)
         parent_columns = torch.where(num_nodes[:, None] > 0, parents.to(torch.long), chain_parents[None, :])
@@ -146,6 +152,7 @@ class SharedGDNTreeMetadata:
         return cls(
             slots=slots,
             page_batch=page_batch,
+            cropped_batch=cropped_batch,
             conv_width=conv_width,
             request_id=request_id,
             init_state_columns=init_state_columns,

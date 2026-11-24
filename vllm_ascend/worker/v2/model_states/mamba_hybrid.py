@@ -41,7 +41,13 @@ from vllm.v1.worker.mamba_utils import (
 )
 from vllm.v1.worker.utils import AttentionGroup
 
-from vllm_ascend.ops.triton.spec_decode.tree.gdn_tree_pages import GDNTreePageBatch, GDNTreePagePointers
+from vllm_ascend.ops.triton.spec_decode.tree.gdn_tree_pages import (
+    GDNCroppedRefreshBatch,
+    GDNCroppedRefreshPointers,
+    GDNTreePageBatch,
+    GDNTreePagePointers,
+    cropped_refresh_enabled,
+)
 from vllm_ascend.ops.triton.spec_decode.tree.state_commit import commit_tree_snapshot_metadata
 from vllm_ascend.utils import model_uses_kimi_kda, model_uses_kpool_indexer
 from vllm_ascend.worker.v2.attn_utils import build_attn_metadata
@@ -776,6 +782,8 @@ class AscendMambaHybridModelState(MambaHybridModelState, AscendModelState):
         tree = model_specific_metadata.shared_gdn_tree
         if tree is not None and tree.page_batch is not None:
             tree.page_batch.finish(tree.init_state_columns)
+        if tree is not None and tree.cropped_batch is not None:
+            tree.cropped_batch.finish(tree, model_specific_metadata.num_accepted_tokens)
         return metadata
 
 
@@ -787,6 +795,7 @@ class AscendTreeMambaHybridModelState(AscendMambaHybridModelState):
     # means the linear-chain convention (``num_sampled``) applies.
     _tree_resume_column: torch.Tensor | None = None
     _gdn_page_pointers: GDNTreePagePointers | None = None
+    _gdn_cropped_refresh_pointers: GDNCroppedRefreshPointers | None = None
     # Accepted draft path of the step being committed, in batch order, plus its
     # sampled token count; kept per request so the next step can re-anchor the
     # short-conv history (``0`` marks a request without a fresh tree path).
@@ -952,6 +961,21 @@ class AscendTreeMambaHybridModelState(AscendMambaHybridModelState):
             return
         full_row = metadata.tree_query_width in (None, metadata.tree_parents.shape[1] + 1)
         page_batch = None
+        cropped_batch = None
+        if (
+            not full_row
+            and metadata.tree_query_width is not None
+            and 1 < metadata.tree_query_width < metadata.tree_parents.shape[1] + 1
+            and (
+                not self.vllm_config.scheduler_config.async_scheduling
+                or metadata.tree_request_id is not None
+            )
+            and metadata.tree_parents.device.type == "npu"
+            and cropped_refresh_enabled()
+        ):
+            if self._gdn_cropped_refresh_pointers is None:
+                self._gdn_cropped_refresh_pointers = GDNCroppedRefreshPointers()
+            cropped_batch = GDNCroppedRefreshBatch(self._gdn_cropped_refresh_pointers)
         if (
             full_row
             and not self.vllm_config.scheduler_config.async_scheduling
@@ -974,4 +998,5 @@ class AscendTreeMambaHybridModelState(AscendMambaHybridModelState):
             request_id=metadata.tree_request_id,
             use_fused_topology=full_row and not self.vllm_config.scheduler_config.async_scheduling,
             page_batch=page_batch,
+            cropped_batch=cropped_batch,
         )
