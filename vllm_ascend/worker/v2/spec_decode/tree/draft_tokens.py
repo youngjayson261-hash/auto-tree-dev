@@ -68,6 +68,7 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         # offline without a profiler.
         self._width_trace_path = os.environ.get("VLLM_ASCEND_BUDGET_WIDTH_TRACE") or None
         self._width_trace_file = None
+        self._width_trace_step = 0
         # Stats-correction handoff for placeholder mode (env-gated): the worker
         # drops this step's true widths here so the core-side scheduler stats
         # patch can count real widths instead of placeholder widths.
@@ -242,9 +243,16 @@ class TreeDraftTokensHandler(DraftTokensHandler):
             if self._width_trace_file is None:
                 self._width_trace_file = open(self._width_trace_path, "a", encoding="utf-8")
             status_by_req = {req: int(status) for req, (_, status) in zip(pending.req_ids, rows)}
+            step = self._width_trace_step
+            self._width_trace_step += 1
             for req_id, _, budget in accepted:
-                row = dict(ts=time.time(), req_id=req_id, budget=budget,
-                           status=status_by_req.get(req_id, -1), mode=mode)
+                status = status_by_req.get(req_id, -1)
+                try:
+                    status_name = PolicyStatus(status).name
+                except ValueError:
+                    status_name = "UNKNOWN"
+                row = dict(ts=time.time(), step=step, req_id=req_id, budget=budget,
+                           status=status, status_name=status_name, mode=mode)
                 self._width_trace_file.write(json.dumps(row, separators=(",", ":")) + "\n")
             self._width_trace_file.flush()
         except Exception:
