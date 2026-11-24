@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -61,6 +63,15 @@ class TreeDraftTokensHandler(DraftTokensHandler):
         self._budget_sealed = False
         self._placeholder_mode = budget_placeholder_schedule is True
         self._placeholder_outstanding: _PendingBudget | None = None
+        # Per-step true-width trace (env-gated): every delivery/patch appends
+        # one jsonl row per request so true acceptance rates can be computed
+        # offline without a profiler.
+        self._width_trace_path = os.environ.get("VLLM_ASCEND_BUDGET_WIDTH_TRACE") or None
+        self._width_trace_file = None
+        # Stats-correction handoff for placeholder mode (env-gated): the worker
+        # drops this step's true widths here so the core-side scheduler stats
+        # patch can count real widths instead of placeholder widths.
+        self._width_patch_dir = os.environ.get("VLLM_ASCEND_TREE_BUDGET_PATCH_DIR") or None
         if self._budget_enabled:
             self._budget_cpu = torch.empty((req_states.max_num_reqs, 2), dtype=torch.int32, pin_memory=True)
             self._budget_produced = torch.npu.Event()
@@ -141,6 +152,7 @@ class TreeDraftTokensHandler(DraftTokensHandler):
                 self.req_states.tree_next_budget_cpu[slot] = budget
             if self._budget_stats is not None and self._budget_stats.enabled:
                 self._budget_stats.record_budget_delivery(self.speculator.tree_builder, pending.req_ids, rows, accepted)
+            self._record_width_rows(pending, rows, accepted, "sync")
             return DraftTokenIds([req_id for req_id, _, _ in accepted], [[-1] * budget for _, _, budget in accepted])
         finally:
             self._pending_budget = None
@@ -205,10 +217,63 @@ class TreeDraftTokensHandler(DraftTokensHandler):
                 self._budget_stats.record_budget_delivery(
                     self.speculator.tree_builder, outstanding.req_ids, rows, accepted
                 )
+            self._record_width_rows(outstanding, rows, accepted, "placeholder")
+            self._publish_width_patch(accepted)
         finally:
             self._pending_budget = None
             self._budget_sealed = False
         return wait_s
+
+    @staticmethod
+    def _trace_rank_zero() -> bool:
+        """All TP ranks run the handler with identical rows; only rank 0 writes."""
+        try:
+            from vllm.distributed import get_tp_group
+
+            return get_tp_group().rank == 0
+        except Exception:
+            return True
+
+    def _record_width_rows(self, pending: _PendingBudget, rows: list, accepted: list, mode: str) -> None:
+        """Append this step's true pruned widths to the trace jsonl (env-gated)."""
+        if not self._width_trace_path or not self._trace_rank_zero():
+            return
+        try:
+            if self._width_trace_file is None:
+                self._width_trace_file = open(self._width_trace_path, "a", encoding="utf-8")
+            status_by_req = {req: int(status) for req, (_, status) in zip(pending.req_ids, rows)}
+            for req_id, _, budget in accepted:
+                row = dict(ts=time.time(), req_id=req_id, budget=budget,
+                           status=status_by_req.get(req_id, -1), mode=mode)
+                self._width_trace_file.write(json.dumps(row, separators=(",", ":")) + "\n")
+            self._width_trace_file.flush()
+        except Exception:
+            # Telemetry must never break serving.
+            pass
+
+    def _publish_width_patch(self, accepted: list) -> None:
+        """Hand this step's true widths to the core-side scheduler stats patch.
+
+        Placeholder mode publishes full-width tokens to the core, so the core's
+        spec-decode stats would count placeholder widths. The true widths are
+        dropped here (atomic rename) right before execution; the core consumes
+        them during this step's output processing. Sync scheduling guarantees
+        the ordering; functional accounting is intentionally left on the
+        placeholder length (schedule-advance and rejection-rollback cancel out),
+        only stats are corrected.
+        """
+        if not self._width_patch_dir or not self._trace_rank_zero():
+            return
+        try:
+            payload = json.dumps({"widths": {req: budget for req, _, budget in accepted}},
+                                 separators=(",", ":"))
+            tmp = os.path.join(self._width_patch_dir, ".pending_widths.tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+            os.replace(tmp, os.path.join(self._width_patch_dir, "pending_widths.json"))
+        except Exception:
+            # Stats correction must never break serving.
+            pass
 
     def _seal_budget_copy(self) -> None:
         """Enqueue this step's packet D2H on the copy stream without blocking.
